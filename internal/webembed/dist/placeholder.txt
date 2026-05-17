@@ -1,0 +1,2 @@
+This file exists so `go build` / `go run` can satisfy //go:embed before the SPA is built.
+Run `make build-web` (or `pnpm run build` in web/) to produce index.html and assets.

@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8"><title>Booking Reminder</title></head>
+<body style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:24px;color:#1a1a1a;">
+  <h1 style="color:#1d4ed8;margin-bottom:4px;">Upcoming Booking Reminder</h1>
+  <p style="color:#555;margin-top:0;">This is a reminder for your upcoming booking at <strong>{{.ResourceName}}</strong>.</p>
+
+  <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:20px;margin:24px 0;">
+    <p style="margin:0 0 8px;"><strong>Name:</strong> {{.BookerName}}</p>
+    <p style="margin:0 0 8px;"><strong>Start:</strong> {{formatTime .StartTime}}</p>
+    <p style="margin:0;"><strong>End:</strong> {{formatTime .EndTime}}</p>
+  </div>
+
+  <p style="color:#555;font-size:14px;">
+    Need to cancel? You can do so up until your session begins.
+  </p>
+
+  <div style="margin:24px 0;">
+    <a href="{{.CancelURL}}" style="display:inline-block;background:white;color:#dc2626;padding:10px 20px;border-radius:6px;text-decoration:none;border:1px solid #dc2626;">Cancel Booking</a>
+  </div>
+</body>
+</html>

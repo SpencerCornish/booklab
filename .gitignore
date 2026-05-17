@@ -1,0 +1,9 @@
+.env
+web/node_modules/
+web/package-lock.json
+web/dist/
+internal/webembed/dist/*
+!internal/webembed/dist/placeholder.txt
+*.exe
+booklab
+go.sum

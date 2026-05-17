@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8"><title>Booking Cancelled</title></head>
+<body style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:24px;color:#1a1a1a;">
+  <h1 style="color:#dc2626;margin-bottom:4px;">Booking Cancelled</h1>
+  <p style="color:#555;margin-top:0;">Your booking at <strong>{{.ResourceName}}</strong> has been cancelled.</p>
+
+  <div style="background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:20px;margin:24px 0;">
+    <p style="margin:0 0 8px;"><strong>Name:</strong> {{.BookerName}}</p>
+    <p style="margin:0 0 8px;"><strong>Was scheduled:</strong> {{formatTime .StartTime}}</p>
+    <p style="margin:0;"><strong>Until:</strong> {{formatTime .EndTime}}</p>
+  </div>
+
+  <p style="color:#555;font-size:14px;">
+    No charge will be made. Your saved payment method has been removed.
+  </p>
+
+  <p style="color:#9ca3af;font-size:12px;border-top:1px solid #e5e7eb;padding-top:16px;">
+    If you didn't request this cancellation, please contact us.
+  </p>
+</body>
+</html>

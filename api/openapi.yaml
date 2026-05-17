@@ -1,0 +1,631 @@
+openapi: 3.1.0
+info:
+  title: BookLab API
+  description: Self-hosted resource booking system with hourly post-use billing via Stripe.
+  version: 1.0.0
+  license:
+    name: MIT
+
+servers:
+  - url: /api
+    description: Relative to the running server
+
+tags:
+  - name: public
+    description: Public booking endpoints
+  - name: admin
+    description: Admin-only endpoints (session auth required)
+
+paths:
+  /settings/public:
+    get:
+      tags: [public]
+      summary: Get public settings
+      description: Returns resource name, hourly rate, currency, and bookable hour window — no secrets.
+      operationId: getPublicSettings
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PublicSettings"
+
+  /availability:
+    get:
+      tags: [public]
+      summary: Get available time slots for a date
+      description: Returns list of available 1-hour slots accounting for bookings, closures, and configured hours.
+      operationId: getAvailability
+      parameters:
+        - name: date
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+            example: "2026-06-01"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AvailabilityResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
+  /bookings:
+    post:
+      tags: [public]
+      summary: Create a booking
+      description: Creates a confirmed booking and returns a Stripe SetupIntent client_secret for card collection.
+      operationId: createBooking
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateBookingRequest"
+      responses:
+        "201":
+          description: Booking created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreateBookingResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "409":
+          description: Time slot conflict
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /bookings/{token}:
+    get:
+      tags: [public]
+      summary: View booking by magic token
+      operationId: getBooking
+      parameters:
+        - $ref: "#/components/parameters/CancelToken"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BookingPublic"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /bookings/{token}/cancel:
+    post:
+      tags: [public]
+      summary: Cancel booking via magic token
+      operationId: cancelBooking
+      parameters:
+        - $ref: "#/components/parameters/CancelToken"
+      responses:
+        "200":
+          description: Booking cancelled
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BookingPublic"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: Booking cannot be cancelled (already cancelled or charged)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /admin/login:
+    post:
+      tags: [admin]
+      summary: Admin login
+      operationId: adminLogin
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: Logged in — sets session cookie
+          headers:
+            Set-Cookie:
+              schema:
+                type: string
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /admin/logout:
+    post:
+      tags: [admin]
+      summary: Admin logout
+      operationId: adminLogout
+      responses:
+        "204":
+          description: Logged out
+
+  /admin/bookings:
+    get:
+      tags: [admin]
+      summary: List bookings
+      operationId: adminListBookings
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: date
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: status
+          in: query
+          schema:
+            $ref: "#/components/schemas/BookingStatus"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/BookingAdmin"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /admin/bookings/{id}:
+    patch:
+      tags: [admin]
+      summary: Adjust booking
+      description: Adjust end_time or status of a booking.
+      operationId: adminUpdateBooking
+      security:
+        - sessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/BookingID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateBookingRequest"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BookingAdmin"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /admin/bookings/{id}/charge:
+    post:
+      tags: [admin]
+      summary: Charge a booking
+      description: Creates an off-session PaymentIntent using the saved payment method.
+      operationId: adminChargeBooking
+      security:
+        - sessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/BookingID"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChargeBookingRequest"
+      responses:
+        "200":
+          description: Charged
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BookingAdmin"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /admin/settings:
+    get:
+      tags: [admin]
+      summary: Get all settings
+      operationId: adminGetSettings
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Settings"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    put:
+      tags: [admin]
+      summary: Update settings
+      operationId: adminUpdateSettings
+      security:
+        - sessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateSettingsRequest"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Settings"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /admin/closures:
+    get:
+      tags: [admin]
+      summary: List closures
+      operationId: adminListClosures
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Closure"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      tags: [admin]
+      summary: Create closure
+      operationId: adminCreateClosure
+      security:
+        - sessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpsertClosureRequest"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Closure"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /admin/closures/{id}:
+    put:
+      tags: [admin]
+      summary: Update closure
+      operationId: adminUpdateClosure
+      security:
+        - sessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/ClosureID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpsertClosureRequest"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Closure"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      tags: [admin]
+      summary: Delete closure
+      operationId: adminDeleteClosure
+      security:
+        - sessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/ClosureID"
+      responses:
+        "204":
+          description: Deleted
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+components:
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: booklab_session
+
+  parameters:
+    CancelToken:
+      name: token
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    BookingID:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: integer
+    ClosureID:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: integer
+
+  responses:
+    BadRequest:
+      description: Bad request
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Unauthorized:
+      description: Unauthorized
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    NotFound:
+      description: Not found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+
+    BookingStatus:
+      type: string
+      enum: [confirmed, cancelled, completed, charged]
+
+    PublicSettings:
+      type: object
+      properties:
+        resource_name:
+          type: string
+        hourly_rate_cents:
+          type: integer
+        currency:
+          type: string
+        bookable_start:
+          type: string
+          example: "09:00"
+        bookable_end:
+          type: string
+          example: "21:00"
+        min_hours:
+          type: integer
+        max_hours:
+          type: integer
+        timezone:
+          type: string
+
+    Settings:
+      allOf:
+        - $ref: "#/components/schemas/PublicSettings"
+        - type: object
+          properties:
+            reminder_hours_before:
+              type: integer
+
+    UpdateSettingsRequest:
+      type: object
+      properties:
+        resource_name:
+          type: string
+        hourly_rate_cents:
+          type: integer
+        currency:
+          type: string
+        timezone:
+          type: string
+        bookable_start:
+          type: string
+        bookable_end:
+          type: string
+        min_hours:
+          type: integer
+        max_hours:
+          type: integer
+        reminder_hours_before:
+          type: integer
+
+    AvailabilityResponse:
+      type: object
+      required: [date, slots, is_closed]
+      properties:
+        date:
+          type: string
+          format: date
+        is_closed:
+          type: boolean
+        closure_reason:
+          type: string
+          nullable: true
+        slots:
+          type: array
+          items:
+            $ref: "#/components/schemas/TimeSlot"
+
+    TimeSlot:
+      type: object
+      required: [start, end, available]
+      properties:
+        start:
+          type: string
+          format: date-time
+        end:
+          type: string
+          format: date-time
+        available:
+          type: boolean
+
+    CreateBookingRequest:
+      type: object
+      required: [name, email, start_time, end_time]
+      properties:
+        name:
+          type: string
+        email:
+          type: string
+          format: email
+        start_time:
+          type: string
+          format: date-time
+        end_time:
+          type: string
+          format: date-time
+
+    CreateBookingResponse:
+      type: object
+      required: [booking, setup_intent_client_secret]
+      properties:
+        booking:
+          $ref: "#/components/schemas/BookingPublic"
+        setup_intent_client_secret:
+          type: string
+
+    BookingPublic:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        email:
+          type: string
+        start_time:
+          type: string
+          format: date-time
+        end_time:
+          type: string
+          format: date-time
+        status:
+          $ref: "#/components/schemas/BookingStatus"
+        cancel_token:
+          type: string
+          format: uuid
+        created_at:
+          type: string
+          format: date-time
+
+    BookingAdmin:
+      allOf:
+        - $ref: "#/components/schemas/BookingPublic"
+        - type: object
+          properties:
+            stripe_setup_intent_id:
+              type: string
+              nullable: true
+            stripe_payment_method_id:
+              type: string
+              nullable: true
+            stripe_payment_intent_id:
+              type: string
+              nullable: true
+            amount_cents:
+              type: integer
+              nullable: true
+
+    UpdateBookingRequest:
+      type: object
+      properties:
+        end_time:
+          type: string
+          format: date-time
+        status:
+          $ref: "#/components/schemas/BookingStatus"
+
+    ChargeBookingRequest:
+      type: object
+      properties:
+        amount_cents:
+          type: integer
+          description: Override amount; defaults to hourly_rate * hours
+
+    LoginRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username:
+          type: string
+        password:
+          type: string
+
+    Closure:
+      type: object
+      properties:
+        id:
+          type: integer
+        start_date:
+          type: string
+          format: date
+        end_date:
+          type: string
+          format: date
+        reason:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+
+    UpsertClosureRequest:
+      type: object
+      required: [start_date, end_date]
+      properties:
+        start_date:
+          type: string
+          format: date
+        end_date:
+          type: string
+          format: date
+        reason:
+          type: string
