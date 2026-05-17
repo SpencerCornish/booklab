@@ -34,7 +34,7 @@ func openTestPool(t *testing.T) (*pgxpool.Pool, *db.Queries) {
 
 func truncateBookingData(t *testing.T, ctx context.Context, pool *pgxpool.Pool) {
 	t.Helper()
-	_, err := pool.Exec(ctx, `TRUNCATE login_attempts, admin_sessions, bookings, closures RESTART IDENTITY CASCADE`)
+	_, err := pool.Exec(ctx, `TRUNCATE login_attempts, admin_sessions, admin_users, bookings, closures RESTART IDENTITY CASCADE`)
 	if err != nil {
 		t.Fatalf("truncate: %v", err)
 	}

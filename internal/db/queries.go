@@ -223,7 +223,9 @@ func (q *Queries) ClaimBookingForAutoCharge(ctx context.Context) (*Booking, erro
 		SET status = 'charging'
 		FROM pick
 		WHERE b.id = pick.id
-		RETURNING `+bookingColumns)
+		RETURNING b.id, b.name, b.email, b.start_time, b.end_time, b.status, b.cancel_token,
+			b.stripe_setup_intent_id, b.stripe_payment_method_id, b.stripe_payment_intent_id,
+			b.stripe_receipt_url, b.amount_cents, b.reminder_sent, b.completed_at, b.created_at, b.updated_at`)
 	return scanBooking(row)
 }
 

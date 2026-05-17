@@ -46,7 +46,7 @@ jobs:
         run: go vet ./...
 
       - name: go test
-        run: go test ./... -count=1
+        run: go test -p 1 ./... -count=1
 
       - name: go build
         run: go build -o /tmp/booklab ./cmd/server
