@@ -17,11 +17,11 @@ import (
 type Scheduler struct {
 	queries *db.Queries
 	email   *email.Service
-	stripe  *stripe.Service
+	stripe  stripe.Client
 	appURL  string
 }
 
-func New(queries *db.Queries, emailSvc *email.Service, stripeSvc *stripe.Service, appURL string) *Scheduler {
+func New(queries *db.Queries, emailSvc *email.Service, stripeSvc stripe.Client, appURL string) *Scheduler {
 	return &Scheduler{queries: queries, email: emailSvc, stripe: stripeSvc, appURL: appURL}
 }
 

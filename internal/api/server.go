@@ -18,12 +18,12 @@ import (
 type Server struct {
 	cfg     *config.Config
 	queries *db.Queries
-	stripe  *stripesvc.Service
+	stripe  stripesvc.Client
 	email   *emailsvc.Service
 	webFS   fs.FS
 }
 
-func New(cfg *config.Config, queries *db.Queries, stripe *stripesvc.Service, email *emailsvc.Service, webFS fs.FS) *Server {
+func New(cfg *config.Config, queries *db.Queries, stripe stripesvc.Client, email *emailsvc.Service, webFS fs.FS) *Server {
 	return &Server{cfg: cfg, queries: queries, stripe: stripe, email: email, webFS: webFS}
 }
 
