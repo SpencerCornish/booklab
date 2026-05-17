@@ -12,30 +12,30 @@ import (
 type BookingStatus string
 
 const (
-	BookingStatusConfirmed  BookingStatus = "confirmed"
-	BookingStatusCancelled  BookingStatus = "cancelled"
-	BookingStatusCompleted  BookingStatus = "completed"
-	BookingStatusCharging   BookingStatus = "charging"
-	BookingStatusCharged    BookingStatus = "charged"
+	BookingStatusConfirmed BookingStatus = "confirmed"
+	BookingStatusCancelled BookingStatus = "cancelled"
+	BookingStatusCompleted BookingStatus = "completed"
+	BookingStatusCharging  BookingStatus = "charging"
+	BookingStatusCharged   BookingStatus = "charged"
 )
 
 type Booking struct {
-	ID                     int32         `json:"id"`
-	Name                   string        `json:"name"`
-	Email                  string        `json:"email"`
-	StartTime              time.Time     `json:"start_time"`
-	EndTime                time.Time     `json:"end_time"`
-	Status                 BookingStatus `json:"status"`
-	CancelToken            uuid.UUID     `json:"cancel_token"`
-	StripeSetupIntentID    *string       `json:"stripe_setup_intent_id"`
-	StripePaymentMethodID  *string       `json:"stripe_payment_method_id"`
-	StripePaymentIntentID  *string       `json:"stripe_payment_intent_id"`
-	StripeReceiptURL       *string       `json:"stripe_receipt_url"`
-	AmountCents            *int32        `json:"amount_cents"`
-	ReminderSent           bool          `json:"reminder_sent"`
-	CompletedAt            *time.Time    `json:"completed_at"`
-	CreatedAt              time.Time     `json:"created_at"`
-	UpdatedAt              time.Time     `json:"updated_at"`
+	ID                    int32         `json:"id"`
+	Name                  string        `json:"name"`
+	Email                 string        `json:"email"`
+	StartTime             time.Time     `json:"start_time"`
+	EndTime               time.Time     `json:"end_time"`
+	Status                BookingStatus `json:"status"`
+	CancelToken           uuid.UUID     `json:"cancel_token"`
+	StripeSetupIntentID   *string       `json:"stripe_setup_intent_id"`
+	StripePaymentMethodID *string       `json:"stripe_payment_method_id"`
+	StripePaymentIntentID *string       `json:"stripe_payment_intent_id"`
+	StripeReceiptURL      *string       `json:"stripe_receipt_url"`
+	AmountCents           *int32        `json:"amount_cents"`
+	ReminderSent          bool          `json:"reminder_sent"`
+	CompletedAt           *time.Time    `json:"completed_at"`
+	CreatedAt             time.Time     `json:"created_at"`
+	UpdatedAt             time.Time     `json:"updated_at"`
 }
 
 type Closure struct {
@@ -47,17 +47,17 @@ type Closure struct {
 }
 
 type Settings struct {
-	ID                   int32     `json:"id"`
-	ResourceName         string    `json:"resource_name"`
-	HourlyRateCents      int32     `json:"hourly_rate_cents"`
-	Currency             string    `json:"currency"`
-	Timezone             string    `json:"timezone"`
-	BookableStart        time.Time `json:"bookable_start"`
-	BookableEnd          time.Time `json:"bookable_end"`
-	MinHours             int32     `json:"min_hours"`
-	MaxHours             int32     `json:"max_hours"`
-	ReminderHoursBefore  int32     `json:"reminder_hours_before"`
-	NotificationEmails   string    `json:"notification_emails"`
+	ID                  int32     `json:"id"`
+	ResourceName        string    `json:"resource_name"`
+	HourlyRateCents     int32     `json:"hourly_rate_cents"`
+	Currency            string    `json:"currency"`
+	Timezone            string    `json:"timezone"`
+	BookableStart       time.Time `json:"bookable_start"`
+	BookableEnd         time.Time `json:"bookable_end"`
+	MinHours            int32     `json:"min_hours"`
+	MaxHours            int32     `json:"max_hours"`
+	ReminderHoursBefore int32     `json:"reminder_hours_before"`
+	NotificationEmails  string    `json:"notification_emails"`
 }
 
 type AdminUser struct {
