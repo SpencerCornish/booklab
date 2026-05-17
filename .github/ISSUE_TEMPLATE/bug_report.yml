@@ -1,0 +1,48 @@
+name: Bug report
+description: Report something that is not working as documented
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What went wrong, in one or two sentences?
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Commands, clicks, or API calls that trigger the issue.
+      placeholder: |
+        1. …
+        2. …
+        3. …
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version / commit
+      description: Git SHA or release tag, if known.
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, Go version, browser, Docker vs bare metal, etc.

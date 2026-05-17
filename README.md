@@ -99,4 +99,4 @@ docker compose up -d
 
 ## License
 
-MIT
+MIT — see [LICENSE.md](LICENSE.md).

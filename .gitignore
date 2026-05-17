@@ -1,7 +1,18 @@
 .env
+web/.env
+web/.env.*
+!web/.env.example
+
 web/node_modules/
 web/package-lock.json
 web/dist/
+
+# IDE / local tooling
+.cursor/
+*.log
+.DS_Store
+tmp/
+
 # Keep go.sum versioned. Embed needs at least one file under dist/ when not running `make build-web`:
 internal/webembed/dist/*
 !internal/webembed/dist/placeholder.txt
