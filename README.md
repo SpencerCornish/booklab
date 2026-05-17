@@ -32,7 +32,8 @@ All configuration is via environment variables (see `.env.example`):
 | `PORT` | HTTP port (default: 8080) |
 | `STRIPE_SECRET_KEY` | Stripe secret key (`sk_...`) |
 | `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASS` / `SMTP_FROM` | Email config |
-| `APP_URL` | Public URL (used in email links) |
+| `APP_URL` | Public URL (used in email links and as the default CORS origin) |
+| `CORS_ALLOWED_ORIGINS` | Optional comma-separated list of allowed browser origins for credentialed API requests; defaults to `APP_URL` when empty |
 | `ADMIN_USER` / `ADMIN_PASS` | Bootstrap admin credentials (first run only) |
 
 ## Frontend Environment

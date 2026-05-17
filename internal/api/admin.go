@@ -39,8 +39,7 @@ func (s *Server) handleAdminLogin(w http.ResponseWriter, r *http.Request) {
 		Username string `json:"username"`
 		Password string `json:"password"`
 	}
-	if err := readJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request")
+	if !readJSONRequest(w, r, &req) {
 		return
 	}
 
@@ -155,11 +154,10 @@ func (s *Server) handleAdminUpdateBooking(w http.ResponseWriter, r *http.Request
 	}
 
 	var req struct {
-		EndTime *time.Time       `json:"end_time"`
+		EndTime *time.Time        `json:"end_time"`
 		Status  *db.BookingStatus `json:"status"`
 	}
-	if err := readJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+	if !readJSONRequest(w, r, &req) {
 		return
 	}
 
@@ -334,8 +332,7 @@ func (s *Server) handleAdminUpdateSettings(w http.ResponseWriter, r *http.Reques
 		ReminderHoursBefore *int32  `json:"reminder_hours_before"`
 		NotificationEmails  *string `json:"notification_emails"`
 	}
-	if err := readJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+	if !readJSONRequest(w, r, &req) {
 		return
 	}
 
@@ -394,8 +391,7 @@ func (s *Server) handleAdminCreateClosure(w http.ResponseWriter, r *http.Request
 		EndDate   string  `json:"end_date"`
 		Reason    *string `json:"reason"`
 	}
-	if err := readJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+	if !readJSONRequest(w, r, &req) {
 		return
 	}
 
@@ -430,8 +426,7 @@ func (s *Server) handleAdminUpdateClosure(w http.ResponseWriter, r *http.Request
 		EndDate   string  `json:"end_date"`
 		Reason    *string `json:"reason"`
 	}
-	if err := readJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+	if !readJSONRequest(w, r, &req) {
 		return
 	}
 

@@ -28,26 +28,26 @@ todos:
     status: completed
   - id: p2-cors
     content: Add CORS_ALLOWED_ORIGINS config, replace wildcard with explicit allowlist in server.go
-    status: pending
+    status: completed
   - id: p2-booking-policy
     content: Add server-side booking policy validation in handleCreateBooking (hours, window, closures, past-time)
-    status: pending
+    status: completed
   - id: p3-body-limits
     content: Add MaxBytesReader to readJSON, return 413 on oversized bodies
-    status: pending
+    status: completed
   - id: p3-error-sanitize
     content: Remove raw Stripe error from charge response, log internally
     status: completed
   - id: p3-email-headers
     content: Add CRLF sanitization to email header fields in buildMessage
-    status: pending
+    status: completed
   - id: tests
     content: Add tests for double-charge, race conditions, auth, CSRF, CORS, booking policy, body limits, email headers
     status: pending
 isProject: false
 ---
 
-> **Handoff:** P0 charge safety + P1 DB sessions/auth/rate limits + CSRF (double-submit cookie on admin mutations) + charge error sanitization are done in-tree. Next priority is **`p2-cors`**, then **`p2-booking-policy`**, remaining **`p3-*`**, then **`tests`**.
+> **Handoff:** Through Step 5: P0–P2 security items and P3 input hygiene (body size limit, email header CRLF stripping) are done in-tree; Stripe charge errors are already sanitized. Remaining plan work is **`tests`** (Step 6) and any follow-up hardening you want beyond the checklist.
 
 # BookLab Security Fix Plan
 

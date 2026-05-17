@@ -22,14 +22,14 @@ func (s *Server) handleGetPublicSettings(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"resource_name":      settings.ResourceName,
-		"hourly_rate_cents":  settings.HourlyRateCents,
-		"currency":           settings.Currency,
-		"bookable_start":     settings.BookableStart.Format("15:04"),
-		"bookable_end":       settings.BookableEnd.Format("15:04"),
-		"min_hours":          settings.MinHours,
-		"max_hours":          settings.MaxHours,
-		"timezone":           settings.Timezone,
+		"resource_name":     settings.ResourceName,
+		"hourly_rate_cents": settings.HourlyRateCents,
+		"currency":          settings.Currency,
+		"bookable_start":    settings.BookableStart.Format("15:04"),
+		"bookable_end":      settings.BookableEnd.Format("15:04"),
+		"min_hours":         settings.MinHours,
+		"max_hours":         settings.MaxHours,
+		"timezone":          settings.Timezone,
 	})
 }
 
@@ -70,10 +70,10 @@ func (s *Server) handleGetAvailability(w http.ResponseWriter, r *http.Request) {
 			reason = *closures[0].Reason
 		}
 		writeJSON(w, http.StatusOK, map[string]any{
-			"date":             dateStr,
-			"is_closed":        true,
-			"closure_reason":   reason,
-			"slots":            []any{},
+			"date":           dateStr,
+			"is_closed":      true,
+			"closure_reason": reason,
+			"slots":          []any{},
 		})
 		return
 	}
@@ -132,8 +132,7 @@ func (s *Server) handleCreateBooking(w http.ResponseWriter, r *http.Request) {
 		StartTime time.Time `json:"start_time"`
 		EndTime   time.Time `json:"end_time"`
 	}
-	if err := readJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+	if !readJSONRequest(w, r, &req) {
 		return
 	}
 	if req.Name == "" || req.Email == "" {
@@ -148,6 +147,14 @@ func (s *Server) handleCreateBooking(w http.ResponseWriter, r *http.Request) {
 	settings, err := s.queries.GetSettings(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to load settings")
+		return
+	}
+
+	if badReq, err := s.validateBookingCreate(r.Context(), req.StartTime, req.EndTime, settings); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to validate booking")
+		return
+	} else if badReq != "" {
+		writeError(w, http.StatusBadRequest, badReq)
 		return
 	}
 
@@ -305,6 +312,79 @@ func (s *Server) handleCancelBooking(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, bookingToPublic(booking))
+}
+
+func bookableBoundsForDate(day time.Time, st *db.Settings, loc *time.Location) (windowStart, windowEnd time.Time) {
+	d := day.In(loc)
+	y, m, dd := d.Date()
+	sh, sm, _ := st.BookableStart.Clock()
+	eh, em, _ := st.BookableEnd.Clock()
+	windowStart = time.Date(y, m, dd, sh, sm, 0, 0, loc)
+	windowEnd = time.Date(y, m, dd, eh, em, 0, 0, loc)
+	return windowStart, windowEnd
+}
+
+// bookingWithinBookableHours reports whether [start, end) lies within configured
+// bookable hours on every local calendar day the interval touches.
+func bookingWithinBookableHours(start, end time.Time, st *db.Settings, loc *time.Location) bool {
+	start = start.In(loc)
+	end = end.In(loc)
+	if !end.After(start) {
+		return false
+	}
+	for cur := start; cur.Before(end); {
+		y, m, d := cur.Date()
+		day := time.Date(y, m, d, 0, 0, 0, 0, loc)
+		nextMidnight := day.AddDate(0, 0, 1)
+		ws, we := bookableBoundsForDate(day, st, loc)
+		segEnd := end
+		if segEnd.After(nextMidnight) {
+			segEnd = nextMidnight
+		}
+		if cur.Before(ws) || segEnd.After(we) {
+			return false
+		}
+		cur = nextMidnight
+	}
+	return true
+}
+
+func (s *Server) validateBookingCreate(ctx context.Context, start, end time.Time, settings *db.Settings) (badRequest string, err error) {
+	if start.Before(time.Now()) {
+		return "booking start time is in the past", nil
+	}
+
+	loc, lerr := time.LoadLocation(settings.Timezone)
+	if lerr != nil {
+		loc = time.UTC
+	}
+
+	dur := end.Sub(start)
+	minDur := time.Duration(settings.MinHours) * time.Hour
+	maxDur := time.Duration(settings.MaxHours) * time.Hour
+	if dur < minDur {
+		return "booking is shorter than the minimum allowed duration", nil
+	}
+	if dur > maxDur {
+		return "booking exceeds the maximum allowed duration", nil
+	}
+	if !bookingWithinBookableHours(start, end, settings, loc) {
+		return "booking falls outside allowed hours", nil
+	}
+
+	startL := start.In(loc)
+	endL := end.In(loc)
+	fromQ := time.Date(startL.Year(), startL.Month(), startL.Day(), 0, 0, 0, 0, loc)
+	endDay := time.Date(endL.Year(), endL.Month(), endL.Day(), 0, 0, 0, 0, loc)
+	toQ := endDay.AddDate(0, 0, 1)
+	closures, err := s.queries.ListClosuresInRange(ctx, fromQ, toQ)
+	if err != nil {
+		return "", err
+	}
+	if len(closures) > 0 {
+		return "resource is closed for part of this booking", nil
+	}
+	return "", nil
 }
 
 // splitEmails parses a comma-separated list of email addresses.
