@@ -8,9 +8,8 @@ import (
 )
 
 type Config struct {
-	DatabaseURL   string `envconfig:"DATABASE_URL" required:"true"`
-	Port          int    `envconfig:"PORT" default:"8080"`
-	SessionSecret string `envconfig:"SESSION_SECRET" required:"true"`
+	DatabaseURL string `envconfig:"DATABASE_URL" required:"true"`
+	Port        int    `envconfig:"PORT" default:"8080"`
 
 	StripeSecretKey      string `envconfig:"STRIPE_SECRET_KEY" required:"true"`
 	StripeWebhookSecret  string `envconfig:"STRIPE_WEBHOOK_SECRET"`

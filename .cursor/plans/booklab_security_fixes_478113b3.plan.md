@@ -4,25 +4,25 @@ overview: "Implement priority-ordered security fixes across BookLab: prevent dou
 todos:
   - id: p0-db-claim
     content: Add 003 migration for 'charging' status + ClaimBookingForCharge/ClaimBookingForAutoCharge queries in queries.go and models.go
-    status: pending
+    status: completed
   - id: p0-stripe-idempotency
     content: Add idempotencyKey param to ChargePaymentMethod in stripe.go
-    status: pending
+    status: completed
   - id: p0-admin-charge
     content: Rewrite handleAdminChargeBooking to use claim pattern, idempotency key, 409 on duplicate, amount_cents validation
-    status: pending
+    status: completed
   - id: p0-scheduler
     content: Rewrite autoChargeCompleted to use claim-one-at-a-time loop with ClaimBookingForAutoCharge
-    status: pending
+    status: completed
   - id: p1-sessions-db
     content: Add 004 migration for admin_sessions + login_attempts tables, add session/rate-limit query methods
-    status: pending
+    status: completed
   - id: p1-auth-rewrite
     content: "Rewrite middleware.go: DB-backed session create/validate/delete, remove HMAC token code"
-    status: pending
+    status: completed
   - id: p1-login-rate-limit
     content: Add rate limiting to handleAdminLogin, rewrite login/logout to use DB sessions
-    status: pending
+    status: completed
   - id: p1-csrf
     content: Add csrfProtect middleware, wire into admin routes, update frontend api.ts with X-CSRF-Token header
     status: pending
@@ -37,7 +37,7 @@ todos:
     status: pending
   - id: p3-error-sanitize
     content: Remove raw Stripe error from charge response, log internally
-    status: pending
+    status: completed
   - id: p3-email-headers
     content: Add CRLF sanitization to email header fields in buildMessage
     status: pending
@@ -46,6 +46,8 @@ todos:
     status: pending
 isProject: false
 ---
+
+> **Handoff:** P0 charge safety + P1 DB sessions/auth/rate limits + charge error sanitization are done in-tree. Next priority is **`p1-csrf`**, then **`p2-cors`**, **`p2-booking-policy`**, remaining **`p3-*`**, then **`tests`**.
 
 # BookLab Security Fix Plan
 

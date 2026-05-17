@@ -15,7 +15,7 @@ A self-hosted hourly resource booking system with post-use Stripe billing. Built
 
 ```bash
 cp .env.example .env
-# Fill in STRIPE_SECRET_KEY, SMTP_*, SESSION_SECRET, ADMIN_USER, ADMIN_PASS
+# Fill in STRIPE_SECRET_KEY, SMTP_*, ADMIN_USER, ADMIN_PASS
 docker compose up --build
 ```
 
@@ -30,7 +30,6 @@ All configuration is via environment variables (see `.env.example`):
 |---|---|
 | `DATABASE_URL` | PostgreSQL connection string |
 | `PORT` | HTTP port (default: 8080) |
-| `SESSION_SECRET` | Random string for signing admin sessions |
 | `STRIPE_SECRET_KEY` | Stripe secret key (`sk_...`) |
 | `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASS` / `SMTP_FROM` | Email config |
 | `APP_URL` | Public URL (used in email links) |

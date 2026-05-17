@@ -66,3 +66,10 @@ type AdminUser struct {
 	PasswordHash string    `json:"password_hash"`
 	CreatedAt    time.Time `json:"created_at"`
 }
+
+type AdminSession struct {
+	ID        string    `json:"id"`
+	Username  string    `json:"username"`
+	ExpiresAt time.Time `json:"expires_at"`
+	CreatedAt time.Time `json:"created_at"`
+}

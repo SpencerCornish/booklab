@@ -1,52 +1,29 @@
 package api
 
 import (
-	"crypto/hmac"
-	"crypto/sha256"
+	"context"
+	"crypto/rand"
 	"encoding/hex"
-	"fmt"
+	"errors"
 	"net/http"
-	"strings"
 	"time"
+
+	"github.com/jackc/pgx/v5"
+
+	"github.com/spencercornish/booklab/internal/config"
 )
 
-// sessionToken is a simple HMAC-signed token: "username:expiry:sig"
-func newSessionToken(username, secret string) string {
-	expiry := time.Now().Add(24 * time.Hour).Unix()
-	payload := fmt.Sprintf("%s:%d", username, expiry)
-	sig := sign(payload, secret)
-	return fmt.Sprintf("%s:%s", payload, sig)
-}
-
-func validateSessionToken(token, secret string) (string, bool) {
-	parts := strings.Split(token, ":")
-	if len(parts) != 3 {
-		return "", false
+func (s *Server) newAdminSession(ctx context.Context, username string) (sessionID string, err error) {
+	var buf [32]byte
+	if _, err := rand.Read(buf[:]); err != nil {
+		return "", err
 	}
-	username := parts[0]
-	expiryStr := parts[1]
-	sig := parts[2]
-
-	payload := fmt.Sprintf("%s:%s", username, expiryStr)
-	expectedSig := sign(payload, secret)
-	if !hmac.Equal([]byte(sig), []byte(expectedSig)) {
-		return "", false
+	id := hex.EncodeToString(buf[:])
+	expiresAt := time.Now().Add(config.SessionDuration)
+	if err := s.queries.CreateAdminSession(ctx, id, username, expiresAt); err != nil {
+		return "", err
 	}
-
-	var expiry int64
-	if _, err := fmt.Sscanf(expiryStr, "%d", &expiry); err != nil {
-		return "", false
-	}
-	if time.Now().Unix() > expiry {
-		return "", false
-	}
-	return username, true
-}
-
-func sign(payload, secret string) string {
-	mac := hmac.New(sha256.New, []byte(secret))
-	mac.Write([]byte(payload))
-	return hex.EncodeToString(mac.Sum(nil))
+	return id, nil
 }
 
 func (s *Server) requireAdmin(next http.Handler) http.Handler {
@@ -56,12 +33,23 @@ func (s *Server) requireAdmin(next http.Handler) http.Handler {
 			writeError(w, http.StatusUnauthorized, "authentication required")
 			return
 		}
-		username, ok := validateSessionToken(cookie.Value, s.cfg.SessionSecret)
-		if !ok {
-			writeError(w, http.StatusUnauthorized, "invalid or expired session")
+		sess, err := s.queries.GetAdminSession(r.Context(), cookie.Value)
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				writeError(w, http.StatusUnauthorized, "invalid or expired session")
+				return
+			}
+			writeError(w, http.StatusInternalServerError, "session check failed")
 			return
 		}
-		_ = username
+		if _, err := s.queries.GetAdminByUsername(r.Context(), sess.Username); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				writeError(w, http.StatusUnauthorized, "invalid or expired session")
+				return
+			}
+			writeError(w, http.StatusInternalServerError, "session check failed")
+			return
+		}
 		next.ServeHTTP(w, r)
 	})
 }

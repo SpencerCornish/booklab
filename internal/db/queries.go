@@ -409,3 +409,74 @@ func (q *Queries) CreateAdminUser(ctx context.Context, username, passwordHash st
 	}
 	return &u, nil
 }
+
+// ----- Admin sessions -----
+
+func (q *Queries) CreateAdminSession(ctx context.Context, id, username string, expiresAt time.Time) error {
+	_, err := q.pool.Exec(ctx, `
+		INSERT INTO admin_sessions (id, username, expires_at) VALUES ($1, $2, $3)`,
+		id, username, expiresAt,
+	)
+	return err
+}
+
+func (q *Queries) GetAdminSession(ctx context.Context, id string) (*AdminSession, error) {
+	row := q.pool.QueryRow(ctx, `
+		SELECT id, username, expires_at, created_at
+		FROM admin_sessions
+		WHERE id = $1 AND expires_at > NOW()`,
+		id,
+	)
+	var s AdminSession
+	err := row.Scan(&s.ID, &s.Username, &s.ExpiresAt, &s.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+	return &s, nil
+}
+
+func (q *Queries) DeleteAdminSession(ctx context.Context, id string) error {
+	_, err := q.pool.Exec(ctx, `DELETE FROM admin_sessions WHERE id = $1`, id)
+	return err
+}
+
+func (q *Queries) DeleteAdminSessionsByUsername(ctx context.Context, username string) error {
+	_, err := q.pool.Exec(ctx, `DELETE FROM admin_sessions WHERE username = $1`, username)
+	return err
+}
+
+// ----- Login rate limiting -----
+
+func (q *Queries) RecordLoginAttempt(ctx context.Context, username, ipAddress string, success bool) error {
+	_, err := q.pool.Exec(ctx, `
+		INSERT INTO login_attempts (username, ip_address, success) VALUES ($1, $2, $3)`,
+		username, ipAddress, success,
+	)
+	return err
+}
+
+func (q *Queries) CountRecentFailedLoginAttemptsByIP(ctx context.Context, ipAddress string, since time.Time) (int64, error) {
+	row := q.pool.QueryRow(ctx, `
+		SELECT COUNT(*)::bigint FROM login_attempts
+		WHERE ip_address = $1 AND success = false AND created_at >= $2`,
+		ipAddress, since,
+	)
+	var n int64
+	if err := row.Scan(&n); err != nil {
+		return 0, err
+	}
+	return n, nil
+}
+
+func (q *Queries) CountRecentFailedLoginAttemptsByUsername(ctx context.Context, username string, since time.Time) (int64, error) {
+	row := q.pool.QueryRow(ctx, `
+		SELECT COUNT(*)::bigint FROM login_attempts
+		WHERE username = $1 AND success = false AND created_at >= $2`,
+		username, since,
+	)
+	var n int64
+	if err := row.Scan(&n); err != nil {
+		return 0, err
+	}
+	return n, nil
+}

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"strconv"
 	"time"
@@ -15,9 +16,23 @@ import (
 	"github.com/jackc/pgx/v5"
 	"golang.org/x/crypto/bcrypt"
 
+	"github.com/spencercornish/booklab/internal/config"
 	"github.com/spencercornish/booklab/internal/db"
 	emailsvc "github.com/spencercornish/booklab/internal/email"
 )
+
+const (
+	loginRateLimitWindow = 15 * time.Minute
+	loginRateLimitMax    = 10
+)
+
+func clientIP(r *http.Request) string {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return host
+}
 
 func (s *Server) handleAdminLogin(w http.ResponseWriter, r *http.Request) {
 	var req struct {
@@ -29,9 +44,29 @@ func (s *Server) handleAdminLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	user, err := s.queries.GetAdminByUsername(r.Context(), req.Username)
+	ctx := r.Context()
+	since := time.Now().Add(-loginRateLimitWindow)
+	ip := clientIP(r)
+
+	ipFails, err := s.queries.CountRecentFailedLoginAttemptsByIP(ctx, ip, since)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "login failed")
+		return
+	}
+	userFails, err := s.queries.CountRecentFailedLoginAttemptsByUsername(ctx, req.Username, since)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "login failed")
+		return
+	}
+	if ipFails >= loginRateLimitMax || userFails >= loginRateLimitMax {
+		writeError(w, http.StatusTooManyRequests, "too many failed login attempts, try again later")
+		return
+	}
+
+	user, err := s.queries.GetAdminByUsername(ctx, req.Username)
 	if err != nil {
 		if err == pgx.ErrNoRows {
+			_ = s.queries.RecordLoginAttempt(ctx, req.Username, ip, false)
 			writeError(w, http.StatusUnauthorized, "invalid credentials")
 			return
 		}
@@ -40,11 +75,21 @@ func (s *Server) handleAdminLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.Password)); err != nil {
+		_ = s.queries.RecordLoginAttempt(ctx, req.Username, ip, false)
 		writeError(w, http.StatusUnauthorized, "invalid credentials")
 		return
 	}
 
-	token := newSessionToken(user.Username, s.cfg.SessionSecret)
+	if err := s.queries.RecordLoginAttempt(ctx, req.Username, ip, true); err != nil {
+		writeError(w, http.StatusInternalServerError, "login failed")
+		return
+	}
+
+	token, err := s.newAdminSession(ctx, user.Username)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "login failed")
+		return
+	}
 	http.SetCookie(w, &http.Cookie{
 		Name:     "booklab_session",
 		Value:    token,
@@ -52,17 +97,22 @@ func (s *Server) handleAdminLogin(w http.ResponseWriter, r *http.Request) {
 		HttpOnly: true,
 		Secure:   true,
 		SameSite: http.SameSiteLaxMode,
-		MaxAge:   86400,
+		MaxAge:   int(config.SessionDuration.Seconds()),
 	})
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
 func (s *Server) handleAdminLogout(w http.ResponseWriter, r *http.Request) {
+	if cookie, err := r.Cookie("booklab_session"); err == nil && cookie.Value != "" {
+		_ = s.queries.DeleteAdminSession(r.Context(), cookie.Value)
+	}
 	http.SetCookie(w, &http.Cookie{
 		Name:     "booklab_session",
 		Value:    "",
 		Path:     "/",
 		HttpOnly: true,
+		Secure:   true,
+		SameSite: http.SameSiteLaxMode,
 		MaxAge:   -1,
 	})
 	w.WriteHeader(http.StatusNoContent)
