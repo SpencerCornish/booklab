@@ -2,6 +2,10 @@ package api
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"strconv"
@@ -161,6 +165,9 @@ func (s *Server) handleAdminUpdateBooking(w http.ResponseWriter, r *http.Request
 	writeJSON(w, http.StatusOK, bookingToAdmin(booking))
 }
 
+// $200 is a safe max for now
+const maxChargeAmountCents int32 = 20_000
+
 func (s *Server) handleAdminChargeBooking(w http.ResponseWriter, r *http.Request) {
 	id, err := parseID(r)
 	if err != nil {
@@ -171,31 +178,41 @@ func (s *Server) handleAdminChargeBooking(w http.ResponseWriter, r *http.Request
 	var req struct {
 		AmountCents *int32 `json:"amount_cents"`
 	}
-	_ = readJSON(r, &req) // optional body
-
-	booking, err := s.queries.GetBookingByID(r.Context(), id)
-	if err != nil {
-		if err == pgx.ErrNoRows {
-			writeError(w, http.StatusNotFound, "booking not found")
-			return
-		}
-		writeError(w, http.StatusInternalServerError, "failed to load booking")
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
 
-	if booking.StripePaymentMethodID == nil {
-		writeError(w, http.StatusBadRequest, "no payment method on file")
+	booking, err := s.queries.ClaimBookingForCharge(r.Context(), id)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			if _, gerr := s.queries.GetBookingByID(r.Context(), id); gerr == pgx.ErrNoRows {
+				writeError(w, http.StatusNotFound, "booking not found")
+				return
+			}
+			writeError(w, http.StatusConflict, "booking cannot be charged (already charged, in progress, or not eligible)")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to claim booking for charge")
 		return
 	}
 
 	settings, err := s.queries.GetSettings(r.Context())
 	if err != nil {
+		_ = s.queries.RevertBookingFromChargingToCompleted(r.Context(), id)
 		writeError(w, http.StatusInternalServerError, "failed to load settings")
 		return
 	}
 
 	var amountCents int32
 	if req.AmountCents != nil {
+		if *req.AmountCents <= 0 || *req.AmountCents > maxChargeAmountCents {
+			_ = s.queries.RevertBookingFromChargingToCompleted(r.Context(), id)
+			writeError(w, http.StatusBadRequest, "invalid amount_cents")
+			return
+		}
 		amountCents = *req.AmountCents
 	} else {
 		hours := int32(booking.EndTime.Sub(booking.StartTime).Hours())
@@ -203,17 +220,28 @@ func (s *Server) handleAdminChargeBooking(w http.ResponseWriter, r *http.Request
 			hours = 1
 		}
 		amountCents = hours * settings.HourlyRateCents
+		if amountCents <= 0 || amountCents > maxChargeAmountCents {
+			_ = s.queries.RevertBookingFromChargingToCompleted(r.Context(), id)
+			writeError(w, http.StatusBadRequest, "computed charge amount is out of allowed range")
+			return
+		}
 	}
 
 	description := settings.ResourceName + " – " + booking.StartTime.Format("Jan 2, 2006")
-	piID, receiptURL, err := s.stripe.ChargePaymentMethod(*booking.StripePaymentMethodID, int64(amountCents), settings.Currency, description)
+	idempotencyKey := fmt.Sprintf("charge-booking-%d-admin", id)
+	piID, receiptURL, err := s.stripe.ChargePaymentMethod(*booking.StripePaymentMethodID, int64(amountCents), settings.Currency, description, idempotencyKey)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "charge failed: "+err.Error())
+		_ = s.queries.RevertBookingFromChargingToCompleted(r.Context(), id)
+		log.Printf("charge booking %d: %v", id, err)
+		writeError(w, http.StatusInternalServerError, "payment failed")
 		return
 	}
 
 	updated, err := s.queries.UpdateBookingCharged(r.Context(), id, piID, receiptURL, amountCents)
 	if err != nil {
+		if err == pgx.ErrNoRows {
+			log.Printf("charge booking %d: Stripe succeeded but DB finalize failed (no charging row): pi=%s", id, piID)
+		}
 		writeError(w, http.StatusInternalServerError, "failed to record charge")
 		return
 	}

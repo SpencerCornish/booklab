@@ -181,10 +181,60 @@ func (q *Queries) UpdateBookingCharged(ctx context.Context, id int32, paymentInt
 	row := q.pool.QueryRow(ctx, `
 		UPDATE bookings SET status = 'charged', stripe_payment_intent_id = $2,
 			stripe_receipt_url = COALESCE($3, stripe_receipt_url), amount_cents = $4
-		WHERE id = $1 RETURNING `+bookingColumns,
+		WHERE id = $1 AND status = 'charging' RETURNING `+bookingColumns,
 		id, paymentIntentID, receiptPtr, amountCents,
 	)
 	return scanBooking(row)
+}
+
+// ClaimBookingForCharge atomically marks a completed, unpaid booking as charging.
+// Returns pgx.ErrNoRows if the booking is missing or not eligible.
+func (q *Queries) ClaimBookingForCharge(ctx context.Context, id int32) (*Booking, error) {
+	row := q.pool.QueryRow(ctx, `
+		UPDATE bookings SET status = 'charging'
+		WHERE id = $1
+		  AND status = 'completed'
+		  AND stripe_payment_method_id IS NOT NULL
+		  AND stripe_payment_intent_id IS NULL
+		  AND amount_cents IS NULL
+		RETURNING `+bookingColumns,
+		id,
+	)
+	return scanBooking(row)
+}
+
+// ClaimBookingForAutoCharge claims the next eligible booking for auto-charge (at most one row).
+// Uses FOR UPDATE SKIP LOCKED so concurrent schedulers do not select the same booking.
+func (q *Queries) ClaimBookingForAutoCharge(ctx context.Context) (*Booking, error) {
+	row := q.pool.QueryRow(ctx, `
+		WITH pick AS (
+			SELECT id FROM bookings
+			WHERE status = 'completed'
+			  AND completed_at IS NOT NULL
+			  AND completed_at < NOW() - INTERVAL '24 hours'
+			  AND stripe_payment_method_id IS NOT NULL
+			  AND stripe_payment_intent_id IS NULL
+			  AND amount_cents IS NULL
+			ORDER BY completed_at
+			FOR UPDATE SKIP LOCKED
+			LIMIT 1
+		)
+		UPDATE bookings AS b
+		SET status = 'charging'
+		FROM pick
+		WHERE b.id = pick.id
+		RETURNING `+bookingColumns)
+	return scanBooking(row)
+}
+
+// RevertBookingFromChargingToCompleted undoes a charge claim after a failed payment attempt.
+func (q *Queries) RevertBookingFromChargingToCompleted(ctx context.Context, id int32) error {
+	_, err := q.pool.Exec(ctx, `
+		UPDATE bookings SET status = 'completed'
+		WHERE id = $1 AND status = 'charging'`,
+		id,
+	)
+	return err
 }
 
 func (q *Queries) ListBookingsDueAutoCharge(ctx context.Context) ([]*Booking, error) {
@@ -194,6 +244,7 @@ func (q *Queries) ListBookingsDueAutoCharge(ctx context.Context) ([]*Booking, er
 		  AND completed_at IS NOT NULL
 		  AND completed_at < NOW() - INTERVAL '24 hours'
 		  AND stripe_payment_method_id IS NOT NULL
+		  AND stripe_payment_intent_id IS NULL
 		  AND amount_cents IS NULL
 		ORDER BY completed_at`,
 	)

@@ -15,6 +15,7 @@ const (
 	BookingStatusConfirmed  BookingStatus = "confirmed"
 	BookingStatusCancelled  BookingStatus = "cancelled"
 	BookingStatusCompleted  BookingStatus = "completed"
+	BookingStatusCharging   BookingStatus = "charging"
 	BookingStatusCharged    BookingStatus = "charged"
 )
 
