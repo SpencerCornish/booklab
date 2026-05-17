@@ -55,6 +55,7 @@ func (s *Server) Handler() http.Handler {
 		r.Post("/admin/logout", s.handleAdminLogout)
 		r.Group(func(r chi.Router) {
 			r.Use(s.requireAdmin)
+			r.Use(s.csrfProtect)
 			r.Get("/admin/bookings", s.handleAdminListBookings)
 			r.Patch("/admin/bookings/{id}", s.handleAdminUpdateBooking)
 			r.Post("/admin/bookings/{id}/charge", s.handleAdminChargeBooking)

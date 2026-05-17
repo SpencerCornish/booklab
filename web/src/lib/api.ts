@@ -8,11 +8,26 @@ import type {
   Settings,
 } from './types'
 
+function getCsrfToken(): string | undefined {
+  const match = document.cookie.match(/booklab_csrf=([^;]+)/)
+  if (!match?.[1]) return undefined
+  return decodeURIComponent(match[1].trim())
+}
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
+  const method = (options?.method ?? 'GET').toUpperCase()
+  const headers = new Headers(options?.headers)
+  if (!headers.has('Content-Type')) {
+    headers.set('Content-Type', 'application/json')
+  }
+  if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) {
+    const csrf = getCsrfToken()
+    if (csrf) headers.set('X-CSRF-Token', csrf)
+  }
   const res = await fetch(`/api${path}`, {
-    headers: { 'Content-Type': 'application/json' },
-    credentials: 'include',
     ...options,
+    credentials: 'include',
+    headers,
   })
   if (!res.ok) {
     const body = await res.json().catch(() => ({ error: res.statusText }))

@@ -25,7 +25,7 @@ todos:
     status: completed
   - id: p1-csrf
     content: Add csrfProtect middleware, wire into admin routes, update frontend api.ts with X-CSRF-Token header
-    status: pending
+    status: completed
   - id: p2-cors
     content: Add CORS_ALLOWED_ORIGINS config, replace wildcard with explicit allowlist in server.go
     status: pending
@@ -47,7 +47,7 @@ todos:
 isProject: false
 ---
 
-> **Handoff:** P0 charge safety + P1 DB sessions/auth/rate limits + charge error sanitization are done in-tree. Next priority is **`p1-csrf`**, then **`p2-cors`**, **`p2-booking-policy`**, remaining **`p3-*`**, then **`tests`**.
+> **Handoff:** P0 charge safety + P1 DB sessions/auth/rate limits + CSRF (double-submit cookie on admin mutations) + charge error sanitization are done in-tree. Next priority is **`p2-cors`**, then **`p2-booking-policy`**, remaining **`p3-*`**, then **`tests`**.
 
 # BookLab Security Fix Plan
 
