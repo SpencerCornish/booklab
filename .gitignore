@@ -2,8 +2,8 @@
 web/node_modules/
 web/package-lock.json
 web/dist/
+# Keep go.sum versioned. Embed needs at least one file under dist/ when not running `make build-web`:
 internal/webembed/dist/*
 !internal/webembed/dist/placeholder.txt
 *.exe
 booklab
-go.sum

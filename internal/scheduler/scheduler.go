@@ -2,9 +2,12 @@ package scheduler
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 
 	"github.com/spencercornish/booklab/internal/db"
 	"github.com/spencercornish/booklab/internal/email"
@@ -14,11 +17,11 @@ import (
 type Scheduler struct {
 	queries *db.Queries
 	email   *email.Service
-	stripe  *stripe.Service
+	stripe  stripe.Client
 	appURL  string
 }
 
-func New(queries *db.Queries, emailSvc *email.Service, stripeSvc *stripe.Service, appURL string) *Scheduler {
+func New(queries *db.Queries, emailSvc *email.Service, stripeSvc stripe.Client, appURL string) *Scheduler {
 	return &Scheduler{queries: queries, email: emailSvc, stripe: stripeSvc, appURL: appURL}
 }
 
@@ -77,30 +80,48 @@ func (s *Scheduler) sendReminders(ctx context.Context, settings *db.Settings) {
 	}
 }
 
-func (s *Scheduler) autoChargeCompleted(ctx context.Context, settings *db.Settings) {
-	bookings, err := s.queries.ListBookingsDueAutoCharge(ctx)
-	if err != nil {
-		log.Printf("scheduler: list bookings due auto-charge: %v", err)
-		return
-	}
+// $200 is a safe max for now
+const maxChargeAmountCents int32 = 20_000
 
-	for _, b := range bookings {
+func (s *Scheduler) autoChargeCompleted(ctx context.Context, settings *db.Settings) {
+	for {
+		b, err := s.queries.ClaimBookingForAutoCharge(ctx)
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return
+			}
+			log.Printf("scheduler: claim booking for auto-charge: %v", err)
+			return
+		}
+
 		hours := int32(b.EndTime.Sub(b.StartTime).Hours())
 		if hours < 1 {
 			hours = 1
 		}
 		amountCents := hours * settings.HourlyRateCents
-		description := settings.ResourceName + " – " + b.StartTime.Format("Jan 2, 2006") + " (auto)"
+		if amountCents <= 0 || amountCents > maxChargeAmountCents {
+			_ = s.queries.RevertBookingFromChargingToCompleted(ctx, b.ID)
+			log.Printf("scheduler: auto-charge booking %d: amount %d out of range", b.ID, amountCents)
+			continue
+		}
 
-		piID, receiptURL, err := s.stripe.ChargePaymentMethod(*b.StripePaymentMethodID, int64(amountCents), settings.Currency, description)
+		description := settings.ResourceName + " – " + b.StartTime.Format("Jan 2, 2006") + " (auto)"
+		idempotencyKey := fmt.Sprintf("charge-booking-%d-auto", b.ID)
+
+		piID, receiptURL, err := s.stripe.ChargePaymentMethod(*b.StripePaymentMethodID, int64(amountCents), settings.Currency, description, idempotencyKey)
 		if err != nil {
+			_ = s.queries.RevertBookingFromChargingToCompleted(ctx, b.ID)
 			log.Printf("scheduler: auto-charge booking %d: %v", b.ID, err)
 			continue
 		}
 
 		updated, err := s.queries.UpdateBookingCharged(ctx, b.ID, piID, receiptURL, amountCents)
 		if err != nil {
-			log.Printf("scheduler: record auto-charge for booking %d: %v", b.ID, err)
+			if errors.Is(err, pgx.ErrNoRows) {
+				log.Printf("scheduler: auto-charge booking %d: Stripe succeeded but DB finalize failed: pi=%s", b.ID, piID)
+			} else {
+				log.Printf("scheduler: record auto-charge for booking %d: %v", b.ID, err)
+			}
 			continue
 		}
 

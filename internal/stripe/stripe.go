@@ -53,13 +53,17 @@ func (s *Service) GetPaymentMethodFromSetupIntent(setupIntentID string) (string,
 
 // ChargePaymentMethod creates an off-session PaymentIntent and confirms it immediately.
 // Returns the PaymentIntent ID and Stripe-hosted receipt URL.
-func (s *Service) ChargePaymentMethod(pmID string, amountCents int64, currency, description string) (piID, receiptURL string, err error) {
+// idempotencyKey must be stable for the same logical charge (e.g. per booking + charge kind).
+func (s *Service) ChargePaymentMethod(pmID string, amountCents int64, currency, description, idempotencyKey string) (piID, receiptURL string, err error) {
 	pm, err := paymentmethod.Get(pmID, nil)
 	if err != nil {
 		return "", "", fmt.Errorf("get payment method: %w", err)
 	}
 
 	piParams := &stripe.PaymentIntentParams{
+		Params: stripe.Params{
+			IdempotencyKey: stripe.String(idempotencyKey),
+		},
 		Amount:        stripe.Int64(amountCents),
 		Currency:      stripe.String(currency),
 		PaymentMethod: stripe.String(pmID),

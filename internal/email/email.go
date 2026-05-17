@@ -160,7 +160,14 @@ func envelopeSender(smtpUser, fromHeader string) string {
 	return fromHeader
 }
 
+func sanitizeHeader(s string) string {
+	return strings.NewReplacer("\r", "", "\n", "").Replace(s)
+}
+
 func buildMessage(from, to, subject, htmlBody string) string {
+	from = sanitizeHeader(from)
+	to = sanitizeHeader(to)
+	subject = sanitizeHeader(subject)
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("From: %s\r\n", from))
 	sb.WriteString(fmt.Sprintf("To: %s\r\n", to))

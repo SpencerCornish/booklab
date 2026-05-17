@@ -40,7 +40,7 @@ export function TimeSlotPicker({ slots, selectedStart, selectedEnd, minHours, ma
     // Check all slots between start and click are available
     const range = slots.slice(startIdx, clickIdx + 1)
     const hours = range.length
-    if (hours > maxHours) return
+    if (hours < minHours || hours > maxHours) return
     if (!range.every((s) => s.available)) return
 
     onSelect(selectedStart, slot.end)
@@ -100,7 +100,7 @@ export function TimeSlotPicker({ slots, selectedStart, selectedEnd, minHours, ma
         </div>
       )}
       <p className="mt-2 text-xs text-gray-400">
-        Tap a slot to start. Tap another to extend (max {maxHours} hrs).
+        Tap a slot to start. Tap another to extend (min {minHours} hrs, max {maxHours} hrs).
       </p>
     </div>
   )

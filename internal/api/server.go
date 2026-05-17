@@ -18,12 +18,12 @@ import (
 type Server struct {
 	cfg     *config.Config
 	queries *db.Queries
-	stripe  *stripesvc.Service
+	stripe  stripesvc.Client
 	email   *emailsvc.Service
 	webFS   fs.FS
 }
 
-func New(cfg *config.Config, queries *db.Queries, stripe *stripesvc.Service, email *emailsvc.Service, webFS fs.FS) *Server {
+func New(cfg *config.Config, queries *db.Queries, stripe stripesvc.Client, email *emailsvc.Service, webFS fs.FS) *Server {
 	return &Server{cfg: cfg, queries: queries, stripe: stripe, email: email, webFS: webFS}
 }
 
@@ -34,9 +34,9 @@ func (s *Server) Handler() http.Handler {
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.RealIP)
 	r.Use(cors.Handler(cors.Options{
-		AllowedOrigins:   []string{"*"},
+		AllowedOrigins:   s.cfg.AllowedCORSOrigins(),
 		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
-		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type"},
+		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-CSRF-Token"},
 		AllowCredentials: true,
 	}))
 
@@ -55,6 +55,7 @@ func (s *Server) Handler() http.Handler {
 		r.Post("/admin/logout", s.handleAdminLogout)
 		r.Group(func(r chi.Router) {
 			r.Use(s.requireAdmin)
+			r.Use(s.csrfProtect)
 			r.Get("/admin/bookings", s.handleAdminListBookings)
 			r.Patch("/admin/bookings/{id}", s.handleAdminUpdateBooking)
 			r.Post("/admin/bookings/{id}/charge", s.handleAdminChargeBooking)

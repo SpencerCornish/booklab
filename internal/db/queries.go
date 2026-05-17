@@ -181,10 +181,62 @@ func (q *Queries) UpdateBookingCharged(ctx context.Context, id int32, paymentInt
 	row := q.pool.QueryRow(ctx, `
 		UPDATE bookings SET status = 'charged', stripe_payment_intent_id = $2,
 			stripe_receipt_url = COALESCE($3, stripe_receipt_url), amount_cents = $4
-		WHERE id = $1 RETURNING `+bookingColumns,
+		WHERE id = $1 AND status = 'charging' RETURNING `+bookingColumns,
 		id, paymentIntentID, receiptPtr, amountCents,
 	)
 	return scanBooking(row)
+}
+
+// ClaimBookingForCharge atomically marks a completed, unpaid booking as charging.
+// Returns pgx.ErrNoRows if the booking is missing or not eligible.
+func (q *Queries) ClaimBookingForCharge(ctx context.Context, id int32) (*Booking, error) {
+	row := q.pool.QueryRow(ctx, `
+		UPDATE bookings SET status = 'charging'
+		WHERE id = $1
+		  AND status = 'completed'
+		  AND stripe_payment_method_id IS NOT NULL
+		  AND stripe_payment_intent_id IS NULL
+		  AND amount_cents IS NULL
+		RETURNING `+bookingColumns,
+		id,
+	)
+	return scanBooking(row)
+}
+
+// ClaimBookingForAutoCharge claims the next eligible booking for auto-charge (at most one row).
+// Uses FOR UPDATE SKIP LOCKED so concurrent schedulers do not select the same booking.
+func (q *Queries) ClaimBookingForAutoCharge(ctx context.Context) (*Booking, error) {
+	row := q.pool.QueryRow(ctx, `
+		WITH pick AS (
+			SELECT id FROM bookings
+			WHERE status = 'completed'
+			  AND completed_at IS NOT NULL
+			  AND completed_at < NOW() - INTERVAL '24 hours'
+			  AND stripe_payment_method_id IS NOT NULL
+			  AND stripe_payment_intent_id IS NULL
+			  AND amount_cents IS NULL
+			ORDER BY completed_at
+			FOR UPDATE SKIP LOCKED
+			LIMIT 1
+		)
+		UPDATE bookings AS b
+		SET status = 'charging'
+		FROM pick
+		WHERE b.id = pick.id
+		RETURNING b.id, b.name, b.email, b.start_time, b.end_time, b.status, b.cancel_token,
+			b.stripe_setup_intent_id, b.stripe_payment_method_id, b.stripe_payment_intent_id,
+			b.stripe_receipt_url, b.amount_cents, b.reminder_sent, b.completed_at, b.created_at, b.updated_at`)
+	return scanBooking(row)
+}
+
+// RevertBookingFromChargingToCompleted undoes a charge claim after a failed payment attempt.
+func (q *Queries) RevertBookingFromChargingToCompleted(ctx context.Context, id int32) error {
+	_, err := q.pool.Exec(ctx, `
+		UPDATE bookings SET status = 'completed'
+		WHERE id = $1 AND status = 'charging'`,
+		id,
+	)
+	return err
 }
 
 func (q *Queries) ListBookingsDueAutoCharge(ctx context.Context) ([]*Booking, error) {
@@ -194,6 +246,7 @@ func (q *Queries) ListBookingsDueAutoCharge(ctx context.Context) ([]*Booking, er
 		  AND completed_at IS NOT NULL
 		  AND completed_at < NOW() - INTERVAL '24 hours'
 		  AND stripe_payment_method_id IS NOT NULL
+		  AND stripe_payment_intent_id IS NULL
 		  AND amount_cents IS NULL
 		ORDER BY completed_at`,
 	)
@@ -357,4 +410,75 @@ func (q *Queries) CreateAdminUser(ctx context.Context, username, passwordHash st
 		return nil, err
 	}
 	return &u, nil
+}
+
+// ----- Admin sessions -----
+
+func (q *Queries) CreateAdminSession(ctx context.Context, id, username string, expiresAt time.Time) error {
+	_, err := q.pool.Exec(ctx, `
+		INSERT INTO admin_sessions (id, username, expires_at) VALUES ($1, $2, $3)`,
+		id, username, expiresAt,
+	)
+	return err
+}
+
+func (q *Queries) GetAdminSession(ctx context.Context, id string) (*AdminSession, error) {
+	row := q.pool.QueryRow(ctx, `
+		SELECT id, username, expires_at, created_at
+		FROM admin_sessions
+		WHERE id = $1 AND expires_at > NOW()`,
+		id,
+	)
+	var s AdminSession
+	err := row.Scan(&s.ID, &s.Username, &s.ExpiresAt, &s.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+	return &s, nil
+}
+
+func (q *Queries) DeleteAdminSession(ctx context.Context, id string) error {
+	_, err := q.pool.Exec(ctx, `DELETE FROM admin_sessions WHERE id = $1`, id)
+	return err
+}
+
+func (q *Queries) DeleteAdminSessionsByUsername(ctx context.Context, username string) error {
+	_, err := q.pool.Exec(ctx, `DELETE FROM admin_sessions WHERE username = $1`, username)
+	return err
+}
+
+// ----- Login rate limiting -----
+
+func (q *Queries) RecordLoginAttempt(ctx context.Context, username, ipAddress string, success bool) error {
+	_, err := q.pool.Exec(ctx, `
+		INSERT INTO login_attempts (username, ip_address, success) VALUES ($1, $2, $3)`,
+		username, ipAddress, success,
+	)
+	return err
+}
+
+func (q *Queries) CountRecentFailedLoginAttemptsByIP(ctx context.Context, ipAddress string, since time.Time) (int64, error) {
+	row := q.pool.QueryRow(ctx, `
+		SELECT COUNT(*)::bigint FROM login_attempts
+		WHERE ip_address = $1 AND success = false AND created_at >= $2`,
+		ipAddress, since,
+	)
+	var n int64
+	if err := row.Scan(&n); err != nil {
+		return 0, err
+	}
+	return n, nil
+}
+
+func (q *Queries) CountRecentFailedLoginAttemptsByUsername(ctx context.Context, username string, since time.Time) (int64, error) {
+	row := q.pool.QueryRow(ctx, `
+		SELECT COUNT(*)::bigint FROM login_attempts
+		WHERE username = $1 AND success = false AND created_at >= $2`,
+		username, since,
+	)
+	var n int64
+	if err := row.Scan(&n); err != nil {
+		return 0, err
+	}
+	return n, nil
 }

@@ -1,0 +1,75 @@
+name: CI
+
+on:
+  workflow_dispatch:
+  push:
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  go:
+    name: Go
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: booklab
+          POSTGRES_PASSWORD: booklab
+          POSTGRES_DB: booklab_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U booklab -d booklab_test"
+          --health-interval 4s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      TEST_DATABASE_URL: postgres://booklab:booklab@localhost:5432/booklab_test?sslmode=disable
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.3"
+          cache-dependency-path: go.sum
+
+      - name: gofmt
+        run: test -z "$(gofmt -l .)"
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go test
+        run: go test -p 1 ./... -count=1
+
+      - name: go build
+        run: go build -o /tmp/booklab ./cmd/server
+
+  web:
+    name: Web
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.1.2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24.15.0"
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+
+      - name: Install & typecheck & build
+        working-directory: web
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm exec tsc --noEmit
+          pnpm run build
