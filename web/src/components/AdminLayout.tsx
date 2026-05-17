@@ -1,5 +1,6 @@
+import { useEffect } from 'react'
 import { Outlet, NavLink, useNavigate } from 'react-router'
-import { adminLogout } from '../lib/api'
+import { adminGetSettings, adminLogout, ApiError } from '../lib/api'
 
 const navItems = [
   { to: '/admin', label: 'Dashboard', end: true },
@@ -10,6 +11,14 @@ const navItems = [
 
 export function AdminLayout() {
   const navigate = useNavigate()
+
+  useEffect(() => {
+    adminGetSettings().catch((err) => {
+      if (err instanceof ApiError && err.status === 401) {
+        navigate('/admin/login', { replace: true })
+      }
+    })
+  }, [navigate])
 
   const handleLogout = async () => {
     await adminLogout().catch(() => {})

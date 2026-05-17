@@ -106,9 +106,21 @@ export default function AdminSettings() {
 
         <section>
           <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">Emails</h2>
-          <div className="bg-white rounded-xl border border-gray-200 p-5">
+          <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-4">
             <Field label="Send reminder N hours before" hint="0 to disable">
               <input type="number" min="0" required className={inputClass} {...numberField('reminder_hours_before')} />
+            </Field>
+            <Field
+              label="Staff notification emails"
+              hint="Comma-separated list of emails to notify on new bookings and completed sessions."
+            >
+              <textarea
+                rows={3}
+                value={(form.notification_emails ?? '') as string}
+                onChange={(e) => setForm((prev) => ({ ...prev, notification_emails: e.target.value }))}
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+                placeholder="staff@example.com, owner@example.com"
+              />
             </Field>
           </div>
         </section>

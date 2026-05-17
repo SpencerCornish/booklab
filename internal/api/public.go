@@ -1,7 +1,10 @@
 package api
 
 import (
+	"context"
+	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -166,7 +169,7 @@ func (s *Server) handleCreateBooking(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Send confirmation email
+	// Send confirmation email + staff notification
 	go func() {
 		data := emailsvc.ConfirmationData{
 			ResourceName: settings.ResourceName,
@@ -177,8 +180,26 @@ func (s *Server) handleCreateBooking(w http.ResponseWriter, r *http.Request) {
 			ViewURL:      s.cfg.AppURL + "/booking/" + booking.CancelToken.String(),
 		}
 		if err := s.email.SendConfirmation(booking.Email, data); err != nil {
-			// Non-fatal: log but don't fail the request
 			_ = err
+		}
+
+		if settings.NotificationEmails != "" {
+			priorCount, _ := s.queries.CountPriorBookings(context.Background(), booking.Email, booking.ID)
+			staffData := emailsvc.StaffNewBookingData{
+				ResourceName:      settings.ResourceName,
+				BookerName:        booking.Name,
+				BookerEmail:       booking.Email,
+				StartTime:         booking.StartTime,
+				EndTime:           booking.EndTime,
+				IsReturnCustomer:  priorCount > 0,
+				PriorBookingCount: priorCount,
+				AdminURL:          s.cfg.AppURL + "/admin/bookings",
+			}
+			for _, addr := range splitEmails(settings.NotificationEmails) {
+				if err := s.email.SendStaffNewBooking(addr, staffData); err != nil {
+					log.Printf("staff new booking email to %s: %v", addr, err)
+				}
+			}
 		}
 	}()
 
@@ -204,6 +225,48 @@ func (s *Server) handleGetBooking(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, bookingToPublic(booking))
+}
+
+func (s *Server) handleConfirmBookingCard(w http.ResponseWriter, r *http.Request) {
+	token, err := uuid.Parse(chi.URLParam(r, "token"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid token")
+		return
+	}
+
+	booking, err := s.queries.GetBookingByToken(r.Context(), token)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			writeError(w, http.StatusNotFound, "booking not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to load booking")
+		return
+	}
+
+	if booking.StripePaymentMethodID != nil {
+		// Already stored, idempotent
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
+	if booking.StripeSetupIntentID == nil {
+		writeError(w, http.StatusBadRequest, "no setup intent on booking")
+		return
+	}
+
+	pmID, err := s.stripe.GetPaymentMethodFromSetupIntent(*booking.StripeSetupIntentID)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "card not yet confirmed")
+		return
+	}
+
+	if _, err := s.queries.UpdateBookingPaymentMethod(r.Context(), booking.ID, pmID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to save payment method")
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) handleCancelBooking(w http.ResponseWriter, r *http.Request) {
@@ -244,6 +307,18 @@ func (s *Server) handleCancelBooking(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, bookingToPublic(booking))
 }
 
+// splitEmails parses a comma-separated list of email addresses.
+func splitEmails(s string) []string {
+	var out []string
+	for _, addr := range strings.Split(s, ",") {
+		addr = strings.TrimSpace(addr)
+		if addr != "" {
+			out = append(out, addr)
+		}
+	}
+	return out
+}
+
 // isConflictError checks if the error is a PostgreSQL exclusion constraint violation.
 func isConflictError(err error) bool {
 	return err != nil && (contains(err.Error(), "bookings_no_overlap") || contains(err.Error(), "exclusion constraint"))
@@ -280,6 +355,8 @@ func bookingToAdmin(b *db.Booking) map[string]any {
 	m["stripe_setup_intent_id"] = b.StripeSetupIntentID
 	m["stripe_payment_method_id"] = b.StripePaymentMethodID
 	m["stripe_payment_intent_id"] = b.StripePaymentIntentID
+	m["stripe_receipt_url"] = b.StripeReceiptURL
 	m["amount_cents"] = b.AmountCents
+	m["completed_at"] = b.CompletedAt
 	return m
 }

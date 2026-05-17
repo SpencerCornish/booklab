@@ -13,6 +13,7 @@ export interface PublicSettings {
 
 export interface Settings extends PublicSettings {
   reminder_hours_before: number
+  notification_emails: string
 }
 
 export interface TimeSlot {
@@ -43,7 +44,9 @@ export interface BookingAdmin extends BookingPublic {
   stripe_setup_intent_id?: string
   stripe_payment_method_id?: string
   stripe_payment_intent_id?: string
+  stripe_receipt_url?: string
   amount_cents?: number
+  completed_at?: string
 }
 
 export interface CreateBookingResponse {

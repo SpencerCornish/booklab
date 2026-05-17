@@ -75,6 +75,28 @@ type ReceiptData struct {
 	StripeReceiptURL string
 }
 
+type StaffNewBookingData struct {
+	ResourceName      string
+	BookerName        string
+	BookerEmail       string
+	StartTime         time.Time
+	EndTime           time.Time
+	IsReturnCustomer  bool
+	PriorBookingCount int64
+	AdminURL          string
+}
+
+type StaffCompletionData struct {
+	ResourceName    string
+	BookerName      string
+	BookerEmail     string
+	StartTime       time.Time
+	EndTime         time.Time
+	AutoAmountCents int32
+	AutoChargeAt    time.Time
+	AdminURL        string
+}
+
 func (s *Service) SendConfirmation(to string, data ConfirmationData) error {
 	return s.send(to, fmt.Sprintf("Booking Confirmed – %s", data.ResourceName), "confirmation.html", data)
 }
@@ -89,6 +111,14 @@ func (s *Service) SendCancellation(to string, data CancellationData) error {
 
 func (s *Service) SendReceipt(to string, data ReceiptData) error {
 	return s.send(to, fmt.Sprintf("Receipt – %s", data.ResourceName), "receipt.html", data)
+}
+
+func (s *Service) SendStaffNewBooking(to string, data StaffNewBookingData) error {
+	return s.send(to, fmt.Sprintf("New Booking – %s", data.ResourceName), "staff_new_booking.html", data)
+}
+
+func (s *Service) SendStaffCompletion(to string, data StaffCompletionData) error {
+	return s.send(to, fmt.Sprintf("Session Complete – Action Required – %s", data.ResourceName), "staff_completion.html", data)
 }
 
 func (s *Service) send(to, subject, tmplName string, data any) error {

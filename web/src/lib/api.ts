@@ -53,6 +53,9 @@ export const getBookingByToken = (token: string) =>
 export const cancelBooking = (token: string) =>
   request<BookingPublic>(`/bookings/${token}/cancel`, { method: 'POST' })
 
+export const confirmBookingCard = (token: string) =>
+  request<void>(`/bookings/${token}/confirm-card`, { method: 'POST' })
+
 // Admin
 export const adminLogin = (username: string, password: string) =>
   request<{ status: string }>('/admin/login', {

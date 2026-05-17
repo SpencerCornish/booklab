@@ -29,8 +29,10 @@ type Booking struct {
 	StripeSetupIntentID    *string       `json:"stripe_setup_intent_id"`
 	StripePaymentMethodID  *string       `json:"stripe_payment_method_id"`
 	StripePaymentIntentID  *string       `json:"stripe_payment_intent_id"`
+	StripeReceiptURL       *string       `json:"stripe_receipt_url"`
 	AmountCents            *int32        `json:"amount_cents"`
 	ReminderSent           bool          `json:"reminder_sent"`
+	CompletedAt            *time.Time    `json:"completed_at"`
 	CreatedAt              time.Time     `json:"created_at"`
 	UpdatedAt              time.Time     `json:"updated_at"`
 }
@@ -54,6 +56,7 @@ type Settings struct {
 	MinHours             int32     `json:"min_hours"`
 	MaxHours             int32     `json:"max_hours"`
 	ReminderHoursBefore  int32     `json:"reminder_hours_before"`
+	NotificationEmails   string    `json:"notification_emails"`
 }
 
 type AdminUser struct {

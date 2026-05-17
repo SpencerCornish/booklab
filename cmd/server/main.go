@@ -42,7 +42,7 @@ func main() {
 		}
 	}
 
-	sched := scheduler.New(queries, emailService, cfg.AppURL)
+	sched := scheduler.New(queries, emailService, stripeService, cfg.AppURL)
 	go sched.Start(ctx)
 
 	// webFS: prefer embedded FS (populated at build time), fall back to disk

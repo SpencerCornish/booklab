@@ -22,7 +22,7 @@ func New(pool *pgxpool.Pool) *Queries {
 
 func (q *Queries) GetSettings(ctx context.Context) (*Settings, error) {
 	row := q.pool.QueryRow(ctx, `SELECT id, resource_name, hourly_rate_cents, currency, timezone,
-		bookable_start, bookable_end, min_hours, max_hours, reminder_hours_before
+		bookable_start, bookable_end, min_hours, max_hours, reminder_hours_before, notification_emails
 		FROM settings WHERE id = 1`)
 	return scanSettings(row)
 }
@@ -37,6 +37,7 @@ type UpdateSettingsParams struct {
 	MinHours            *int32
 	MaxHours            *int32
 	ReminderHoursBefore *int32
+	NotificationEmails  *string
 }
 
 func (q *Queries) UpdateSettings(ctx context.Context, p UpdateSettingsParams) (*Settings, error) {
@@ -50,12 +51,15 @@ func (q *Queries) UpdateSettings(ctx context.Context, p UpdateSettingsParams) (*
 			bookable_end          = COALESCE($6, bookable_end),
 			min_hours             = COALESCE($7, min_hours),
 			max_hours             = COALESCE($8, max_hours),
-			reminder_hours_before = COALESCE($9, reminder_hours_before)
+			reminder_hours_before = COALESCE($9, reminder_hours_before),
+			notification_emails   = COALESCE($10, notification_emails)
 		WHERE id = 1
 		RETURNING id, resource_name, hourly_rate_cents, currency, timezone,
-			bookable_start, bookable_end, min_hours, max_hours, reminder_hours_before`,
+			bookable_start, bookable_end, min_hours, max_hours, reminder_hours_before,
+			notification_emails`,
 		p.ResourceName, p.HourlyRateCents, p.Currency, p.Timezone,
 		p.BookableStart, p.BookableEnd, p.MinHours, p.MaxHours, p.ReminderHoursBefore,
+		p.NotificationEmails,
 	)
 	return scanSettings(row)
 }
@@ -65,6 +69,7 @@ func scanSettings(row pgx.Row) (*Settings, error) {
 	err := row.Scan(
 		&s.ID, &s.ResourceName, &s.HourlyRateCents, &s.Currency, &s.Timezone,
 		&s.BookableStart, &s.BookableEnd, &s.MinHours, &s.MaxHours, &s.ReminderHoursBefore,
+		&s.NotificationEmails,
 	)
 	if err != nil {
 		return nil, err
@@ -144,7 +149,9 @@ func (q *Queries) ListBookingsDueReminder(ctx context.Context, withinHours int) 
 
 func (q *Queries) UpdateBookingStatus(ctx context.Context, id int32, status BookingStatus) (*Booking, error) {
 	row := q.pool.QueryRow(ctx,
-		`UPDATE bookings SET status = $2 WHERE id = $1 RETURNING `+bookingColumns,
+		`UPDATE bookings SET status = $2,
+			completed_at = CASE WHEN $2::booking_status = 'completed' THEN NOW() ELSE completed_at END
+		WHERE id = $1 RETURNING `+bookingColumns,
 		id, status,
 	)
 	return scanBooking(row)
@@ -166,13 +173,44 @@ func (q *Queries) UpdateBookingPaymentMethod(ctx context.Context, id int32, pmID
 	return scanBooking(row)
 }
 
-func (q *Queries) UpdateBookingCharged(ctx context.Context, id int32, paymentIntentID string, amountCents int32) (*Booking, error) {
+func (q *Queries) UpdateBookingCharged(ctx context.Context, id int32, paymentIntentID, receiptURL string, amountCents int32) (*Booking, error) {
+	var receiptPtr *string
+	if receiptURL != "" {
+		receiptPtr = &receiptURL
+	}
 	row := q.pool.QueryRow(ctx, `
-		UPDATE bookings SET status = 'charged', stripe_payment_intent_id = $2, amount_cents = $3
+		UPDATE bookings SET status = 'charged', stripe_payment_intent_id = $2,
+			stripe_receipt_url = COALESCE($3, stripe_receipt_url), amount_cents = $4
 		WHERE id = $1 RETURNING `+bookingColumns,
-		id, paymentIntentID, amountCents,
+		id, paymentIntentID, receiptPtr, amountCents,
 	)
 	return scanBooking(row)
+}
+
+func (q *Queries) ListBookingsDueAutoCharge(ctx context.Context) ([]*Booking, error) {
+	rows, err := q.pool.Query(ctx, `
+		SELECT `+bookingColumns+` FROM bookings
+		WHERE status = 'completed'
+		  AND completed_at IS NOT NULL
+		  AND completed_at < NOW() - INTERVAL '24 hours'
+		  AND stripe_payment_method_id IS NOT NULL
+		  AND amount_cents IS NULL
+		ORDER BY completed_at`,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return collectBookings(rows)
+}
+
+func (q *Queries) CountPriorBookings(ctx context.Context, email string, excludeID int32) (int64, error) {
+	var count int64
+	err := q.pool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM bookings WHERE email = $1 AND id != $2 AND status != 'cancelled'`,
+		email, excludeID,
+	).Scan(&count)
+	return count, err
 }
 
 func (q *Queries) MarkReminderSent(ctx context.Context, id int32) error {
@@ -192,14 +230,15 @@ func (q *Queries) CancelBooking(ctx context.Context, token uuid.UUID) (*Booking,
 
 const bookingColumns = `id, name, email, start_time, end_time, status, cancel_token,
 	stripe_setup_intent_id, stripe_payment_method_id, stripe_payment_intent_id,
-	amount_cents, reminder_sent, created_at, updated_at`
+	stripe_receipt_url, amount_cents, reminder_sent, completed_at, created_at, updated_at`
 
 func scanBooking(row pgx.Row) (*Booking, error) {
 	var b Booking
 	err := row.Scan(
 		&b.ID, &b.Name, &b.Email, &b.StartTime, &b.EndTime, &b.Status, &b.CancelToken,
 		&b.StripeSetupIntentID, &b.StripePaymentMethodID, &b.StripePaymentIntentID,
-		&b.AmountCents, &b.ReminderSent, &b.CreatedAt, &b.UpdatedAt,
+		&b.StripeReceiptURL, &b.AmountCents, &b.ReminderSent, &b.CompletedAt,
+		&b.CreatedAt, &b.UpdatedAt,
 	)
 	if err != nil {
 		return nil, err

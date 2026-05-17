@@ -52,10 +52,11 @@ func (s *Service) GetPaymentMethodFromSetupIntent(setupIntentID string) (string,
 }
 
 // ChargePaymentMethod creates an off-session PaymentIntent and confirms it immediately.
-func (s *Service) ChargePaymentMethod(pmID string, amountCents int64, currency, description string) (string, error) {
+// Returns the PaymentIntent ID and Stripe-hosted receipt URL.
+func (s *Service) ChargePaymentMethod(pmID string, amountCents int64, currency, description string) (piID, receiptURL string, err error) {
 	pm, err := paymentmethod.Get(pmID, nil)
 	if err != nil {
-		return "", fmt.Errorf("get payment method: %w", err)
+		return "", "", fmt.Errorf("get payment method: %w", err)
 	}
 
 	piParams := &stripe.PaymentIntentParams{
@@ -67,11 +68,15 @@ func (s *Service) ChargePaymentMethod(pmID string, amountCents int64, currency, 
 		Confirm:       stripe.Bool(true),
 		OffSession:    stripe.Bool(true),
 	}
+	piParams.AddExpand("latest_charge")
 	pi, err := paymentintent.New(piParams)
 	if err != nil {
-		return "", fmt.Errorf("create payment intent: %w", err)
+		return "", "", fmt.Errorf("create payment intent: %w", err)
 	}
-	return pi.ID, nil
+	if pi.LatestCharge != nil {
+		receiptURL = pi.LatestCharge.ReceiptURL
+	}
+	return pi.ID, receiptURL, nil
 }
 
 // DetachPaymentMethod detaches a saved card (e.g. on cancellation).

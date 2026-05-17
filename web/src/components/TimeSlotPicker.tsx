@@ -8,9 +8,10 @@ interface Props {
   minHours: number
   maxHours: number
   onSelect: (start: string, end: string) => void
+  onClear?: () => void
 }
 
-export function TimeSlotPicker({ slots, selectedStart, selectedEnd, minHours, maxHours, onSelect }: Props) {
+export function TimeSlotPicker({ slots, selectedStart, selectedEnd, minHours, maxHours, onSelect, onClear }: Props) {
   if (slots.length === 0) {
     return (
       <p className="text-sm text-gray-500 py-4 text-center">No slots available for this date.</p>
@@ -82,10 +83,21 @@ export function TimeSlotPicker({ slots, selectedStart, selectedEnd, minHours, ma
         })}
       </div>
       {selectedStart && selectedEnd && (
-        <p className="mt-3 text-sm text-blue-700 font-medium">
-          Selected: {format(parseISO(selectedStart), 'h:mm a')} – {format(parseISO(selectedEnd), 'h:mm a')}
-          {' '}({Math.round((new Date(selectedEnd).getTime() - new Date(selectedStart).getTime()) / 3600000)} hr)
-        </p>
+        <div className="mt-3 flex items-center gap-3">
+          <p className="text-sm text-blue-700 font-medium">
+            Selected: {format(parseISO(selectedStart), 'h:mm a')} – {format(parseISO(selectedEnd), 'h:mm a')}
+            {' '}({Math.round((new Date(selectedEnd).getTime() - new Date(selectedStart).getTime()) / 3600000)} hr)
+          </p>
+          {onClear && (
+            <button
+              type="button"
+              onClick={onClear}
+              className="text-xs text-gray-400 hover:text-gray-600 underline transition-colors"
+            >
+              Clear
+            </button>
+          )}
+        </div>
       )}
       <p className="mt-2 text-xs text-gray-400">
         Tap a slot to start. Tap another to extend (max {maxHours} hrs).

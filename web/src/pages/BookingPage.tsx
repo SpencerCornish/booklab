@@ -8,6 +8,8 @@ import {
   getPublicSettings,
   getAvailability,
   createBooking,
+  cancelBooking,
+  confirmBookingCard,
   ApiError,
 } from '../lib/api'
 import type { PublicSettings, AvailabilityResponse, BookingPublic } from '../lib/types'
@@ -87,6 +89,7 @@ function BookingForm({ settings }: { settings: PublicSettings }) {
     setSubmitting(true)
     setError(null)
 
+    let createdBooking: Awaited<ReturnType<typeof createBooking>>['booking'] | null = null
     try {
       const { booking, setup_intent_client_secret } = await createBooking({
         name,
@@ -94,6 +97,7 @@ function BookingForm({ settings }: { settings: PublicSettings }) {
         start_time: selectedStart,
         end_time: selectedEnd,
       })
+      createdBooking = booking
 
       const cardElement = elements.getElement(CardElement)
       if (!cardElement) throw new Error('Card element not found')
@@ -103,12 +107,21 @@ function BookingForm({ settings }: { settings: PublicSettings }) {
       })
 
       if (stripeError) {
+        // Card setup failed — release the time slot by cancelling the booking
+        cancelBooking(booking.cancel_token).catch(() => {})
         setError(stripeError.message ?? 'Card setup failed')
         return
       }
 
+      // Persist the payment method to the booking so admin can charge later
+      await confirmBookingCard(booking.cancel_token)
+
       setSuccess(booking)
     } catch (err) {
+      // If booking was created but something else failed, clean it up
+      if (createdBooking && !(err instanceof ApiError)) {
+        cancelBooking(createdBooking.cancel_token).catch(() => {})
+      }
       setError(err instanceof ApiError ? err.message : 'Something went wrong')
     } finally {
       setSubmitting(false)
@@ -172,9 +185,26 @@ function BookingForm({ settings }: { settings: PublicSettings }) {
             minHours={settings.min_hours}
             maxHours={settings.max_hours}
             onSelect={handleSlotSelect}
+            onClear={() => { setSelectedStart(null); setSelectedEnd(null) }}
           />
         )}
       </section>
+
+      {/* Estimated total */}
+      {selectedStart && selectedEnd && (() => {
+        const hours = Math.max(1, Math.round(
+          (new Date(selectedEnd).getTime() - new Date(selectedStart).getTime()) / 3600000
+        ))
+        const total = (hours * settings.hourly_rate_cents / 100).toFixed(2)
+        return (
+          <div className="rounded-xl bg-blue-50 border border-blue-100 px-4 py-3 flex items-center justify-between">
+            <span className="text-sm text-blue-800 font-medium">
+              Estimated total · {hours} hr{hours !== 1 ? 's' : ''}
+            </span>
+            <span className="text-lg font-bold text-blue-900">${total}</span>
+          </div>
+        )
+      })()}
 
       {/* Booking details */}
       {selectedStart && selectedEnd && (

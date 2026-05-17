@@ -48,6 +48,7 @@ func (s *Server) Handler() http.Handler {
 		r.Post("/bookings", s.handleCreateBooking)
 		r.Get("/bookings/{token}", s.handleGetBooking)
 		r.Post("/bookings/{token}/cancel", s.handleCancelBooking)
+		r.Post("/bookings/{token}/confirm-card", s.handleConfirmBookingCard)
 
 		// Admin
 		r.Post("/admin/login", s.handleAdminLogin)

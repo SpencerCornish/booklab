@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8"><title>Session Complete – Action Required</title></head>
+<body style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:24px;color:#1a1a1a;">
+  <h1 style="color:#7c3aed;margin-bottom:4px;">Session Complete – Action Required</h1>
+  <p style="color:#555;margin-top:0;">A session at <strong>{{.ResourceName}}</strong> has been marked complete. Please review the booking and charge the customer, or it will be auto-charged at the default rate in 24 hours.</p>
+
+  <div style="background:#f5f3ff;border:1px solid #ddd6fe;border-radius:8px;padding:20px;margin:16px 0;">
+    <p style="margin:0 0 8px;"><strong>Name:</strong> {{.BookerName}}</p>
+    <p style="margin:0 0 8px;"><strong>Email:</strong> {{.BookerEmail}}</p>
+    <p style="margin:0 0 8px;"><strong>Start:</strong> {{formatTime .StartTime}}</p>
+    <p style="margin:0 0 8px;"><strong>End:</strong> {{formatTime .EndTime}}</p>
+    <p style="margin:0;border-top:1px solid #ddd6fe;padding-top:12px;margin-top:12px;">
+      <strong>Auto-charge amount:</strong> {{formatMoney .AutoAmountCents}}<br>
+      <strong>Auto-charges at:</strong> {{formatTime .AutoChargeAt}}
+    </p>
+  </div>
+
+  <p style="margin:20px 0;">
+    <a href="{{.AdminURL}}" style="display:inline-block;background:#7c3aed;color:white;padding:10px 20px;border-radius:6px;text-decoration:none;">Review &amp; Charge in Admin</a>
+  </p>
+
+  <p style="color:#9ca3af;font-size:12px;border-top:1px solid #e5e7eb;padding-top:16px;">
+    If no action is taken, the customer will be automatically charged {{formatMoney .AutoAmountCents}} at {{formatTime .AutoChargeAt}}.
+  </p>
+</body>
+</html>

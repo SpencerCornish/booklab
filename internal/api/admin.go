@@ -1,6 +1,8 @@
 package api
 
 import (
+	"context"
+	"log"
 	"net/http"
 	"strconv"
 	"time"
@@ -125,6 +127,37 @@ func (s *Server) handleAdminUpdateBooking(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusInternalServerError, "failed to update booking")
 		return
 	}
+
+	// Send staff completion notification when a booking is marked done
+	if req.Status != nil && *req.Status == db.BookingStatusCompleted {
+		go func() {
+			settings, err := s.queries.GetSettings(context.Background())
+			if err != nil || settings.NotificationEmails == "" {
+				return
+			}
+			hours := int32(booking.EndTime.Sub(booking.StartTime).Hours())
+			if hours < 1 {
+				hours = 1
+			}
+			autoAmount := hours * settings.HourlyRateCents
+			staffData := emailsvc.StaffCompletionData{
+				ResourceName:    settings.ResourceName,
+				BookerName:      booking.Name,
+				BookerEmail:     booking.Email,
+				StartTime:       booking.StartTime,
+				EndTime:         booking.EndTime,
+				AutoAmountCents: autoAmount,
+				AutoChargeAt:    time.Now().Add(24 * time.Hour),
+				AdminURL:        s.cfg.AppURL + "/admin/bookings",
+			}
+			for _, addr := range splitEmails(settings.NotificationEmails) {
+				if err := s.email.SendStaffCompletion(addr, staffData); err != nil {
+					log.Printf("staff completion email to %s: %v", addr, err)
+				}
+			}
+		}()
+	}
+
 	writeJSON(w, http.StatusOK, bookingToAdmin(booking))
 }
 
@@ -173,13 +206,13 @@ func (s *Server) handleAdminChargeBooking(w http.ResponseWriter, r *http.Request
 	}
 
 	description := settings.ResourceName + " – " + booking.StartTime.Format("Jan 2, 2006")
-	piID, err := s.stripe.ChargePaymentMethod(*booking.StripePaymentMethodID, int64(amountCents), settings.Currency, description)
+	piID, receiptURL, err := s.stripe.ChargePaymentMethod(*booking.StripePaymentMethodID, int64(amountCents), settings.Currency, description)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "charge failed: "+err.Error())
 		return
 	}
 
-	updated, err := s.queries.UpdateBookingCharged(r.Context(), id, piID, amountCents)
+	updated, err := s.queries.UpdateBookingCharged(r.Context(), id, piID, receiptURL, amountCents)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to record charge")
 		return
@@ -188,11 +221,12 @@ func (s *Server) handleAdminChargeBooking(w http.ResponseWriter, r *http.Request
 	// Send receipt email
 	go func() {
 		data := emailsvc.ReceiptData{
-			ResourceName: settings.ResourceName,
-			BookerName:   booking.Name,
-			StartTime:    booking.StartTime,
-			EndTime:      booking.EndTime,
-			AmountCents:  amountCents,
+			ResourceName:     settings.ResourceName,
+			BookerName:       booking.Name,
+			StartTime:        booking.StartTime,
+			EndTime:          booking.EndTime,
+			AmountCents:      amountCents,
+			StripeReceiptURL: receiptURL,
 		}
 		_ = s.email.SendReceipt(booking.Email, data)
 	}()
@@ -220,6 +254,7 @@ func (s *Server) handleAdminUpdateSettings(w http.ResponseWriter, r *http.Reques
 		MinHours            *int32  `json:"min_hours"`
 		MaxHours            *int32  `json:"max_hours"`
 		ReminderHoursBefore *int32  `json:"reminder_hours_before"`
+		NotificationEmails  *string `json:"notification_emails"`
 	}
 	if err := readJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -234,6 +269,7 @@ func (s *Server) handleAdminUpdateSettings(w http.ResponseWriter, r *http.Reques
 		MinHours:            req.MinHours,
 		MaxHours:            req.MaxHours,
 		ReminderHoursBefore: req.ReminderHoursBefore,
+		NotificationEmails:  req.NotificationEmails,
 	}
 
 	if req.BookableStart != nil {
@@ -374,6 +410,7 @@ func settingsToMap(s *db.Settings) map[string]any {
 		"min_hours":             s.MinHours,
 		"max_hours":             s.MaxHours,
 		"reminder_hours_before": s.ReminderHoursBefore,
+		"notification_emails":   s.NotificationEmails,
 	}
 }
 
