@@ -145,13 +145,13 @@ install-tools: ## Install Go, Node, pnpm, etc. from .tool-versions via asdf (add
 setup: ## First-time setup: copy .env.example, install frontend deps
 	@if [ ! -f .env ]; then \
 		cp .env.example .env; \
-		echo "$(CYAN)Created .env from .env.example — fill in your secrets.$(RESET)"; \
+		echo "$(CYAN)Created .env from .env.example - fill in your secrets.$(RESET)"; \
 	else \
 		echo ".env already exists."; \
 	fi
 	@if [ ! -f $(WEB_DIR)/.env ]; then \
 		cp $(WEB_DIR)/.env.example $(WEB_DIR)/.env; \
-		echo "$(CYAN)Created web/.env — add your Stripe publishable key.$(RESET)"; \
+		echo "$(CYAN)Created web/.env - add your Stripe publishable key.$(RESET)"; \
 	fi
 	@echo "$(CYAN)Installing frontend dependencies...$(RESET)"
 	@command -v $(PNPM) >/dev/null 2>&1 || { \

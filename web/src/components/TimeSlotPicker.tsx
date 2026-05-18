@@ -32,7 +32,7 @@ export function TimeSlotPicker({ slots, selectedStart, selectedEnd, minHours, ma
     const clickIdx = slots.findIndex((s) => s.start === slot.start)
 
     if (clickIdx < startIdx) {
-      // Clicked before start — reset
+      // Clicked before start - reset
       onSelect(slot.start, slot.end)
       return
     }

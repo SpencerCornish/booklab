@@ -303,7 +303,7 @@ export default function AdminBookings() {
                     ) : booking.stripe_payment_method_id ? (
                       'Card on file'
                     ) : (
-                      '—'
+                      '-'
                     )}
                   </td>
                   <td className="px-4 py-3">

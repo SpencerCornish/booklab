@@ -39,7 +39,7 @@ make lint    # Go vet or golangci-lint + frontend tsc
 make test    # Go tests
 ```
 
-CI also runs `gofmt`, `go vet`, `go test`, `go build`, and the web typecheck/build — matching that locally reduces review churn.
+CI also runs `gofmt`, `go vet`, `go test`, `go build`, and the web typecheck/build - matching that locally reduces review churn.
 
 ## Pull requests
 

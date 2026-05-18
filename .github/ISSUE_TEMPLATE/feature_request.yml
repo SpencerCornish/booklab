@@ -20,4 +20,4 @@ body:
     id: alternatives
     attributes:
       label: Alternatives considered
-      description: Optional — other approaches you thought about.
+      description: Optional - other approaches you thought about.

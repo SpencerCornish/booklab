@@ -1,7 +1,7 @@
 // Package webembed holds the embedded React SPA.
 // internal/webembed/dist is populated by `pnpm run build` in web/ (see vite outDir).
 // FS is nil until a real build exists (index.html); the server may then fall back
-// to os.DirFS("internal/webembed/dist") — see cmd/server/main.go.
+// to os.DirFS("internal/webembed/dist") - see cmd/server/main.go.
 package webembed
 
 import (

@@ -21,7 +21,7 @@ paths:
     get:
       tags: [public]
       summary: Get public settings
-      description: Returns resource name, hourly rate, currency, and bookable hour window — no secrets.
+      description: Returns resource name, hourly rate, currency, and bookable hour window - no secrets.
       operationId: getPublicSettings
       responses:
         "200":
@@ -136,7 +136,7 @@ paths:
               $ref: "#/components/schemas/LoginRequest"
       responses:
         "200":
-          description: Logged in — sets session cookie
+          description: Logged in - sets session cookie
           headers:
             Set-Cookie:
               schema:

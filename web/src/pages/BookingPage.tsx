@@ -107,7 +107,7 @@ function BookingForm({ settings }: { settings: PublicSettings }) {
       })
 
       if (stripeError) {
-        // Card setup failed — release the time slot by cancelling the booking
+        // Card setup failed - release the time slot by cancelling the booking
         cancelBooking(booking.cancel_token).catch(() => {})
         setError(stripeError.message ?? 'Card setup failed')
         return

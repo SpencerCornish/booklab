@@ -1,4 +1,4 @@
-# Stage 1: Build React SPA (pnpm via npm global — same major as .tool-versions; no Corepack)
+# Stage 1: Build React SPA (pnpm via npm global - same major as .tool-versions; no Corepack)
 FROM node:24-alpine AS frontend
 RUN npm install -g pnpm@11.1.2
 WORKDIR /app/web

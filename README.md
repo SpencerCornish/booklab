@@ -4,12 +4,12 @@ A self-hosted hourly resource booking system with post-use Stripe billing. Built
 
 ## Features
 
-- **Public booking page** — date picker, visual time-slot grid, multi-hour selection
-- **Stripe card-on-file** — card saved at booking, charged after the session by an admin
-- **Admin panel** — bookings list, charge flow, closure management, settings editor
-- **Email notifications** — confirmation, reminder, cancellation, receipt (SMTP)
-- **DB-level conflict prevention** — PostgreSQL exclusion constraint prevents double-bookings
-- **Configurable** — all branding via env vars, suitable for any resource
+- **Public booking page** - date picker, visual time-slot grid, multi-hour selection
+- **Stripe card-on-file** - card saved at booking, charged after the session by an admin
+- **Admin panel** - bookings list, charge flow, closure management, settings editor
+- **Email notifications** - confirmation, reminder, cancellation, receipt (SMTP)
+- **DB-level conflict prevention** - PostgreSQL exclusion constraint prevents double-bookings
+- **Configurable** - all branding via env vars, suitable for any resource
 
 ## Quick Start
 
@@ -49,7 +49,7 @@ Add a `.env` file in `web/` for local development:
 VITE_STRIPE_PUBLISHABLE_KEY=pk_test_...
 ```
 
-Docker builds (dev or prod compose) read `VITE_STRIPE_PUBLISHABLE_KEY` from the **root** `.env` via Compose build args—you do not need `web/.env` on the server for production.
+Docker builds (dev or prod compose) read `VITE_STRIPE_PUBLISHABLE_KEY` from the **root** `.env` via Compose build args-you do not need `web/.env` on the server for production.
 
 ## Architecture
 
@@ -108,4 +108,4 @@ book.example.com {
 
 ## License
 
-MIT — see [LICENSE.md](LICENSE.md).
+MIT - see [LICENSE.md](LICENSE.md).

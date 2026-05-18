@@ -1,6 +1,6 @@
 # Production deployment
 
-Use **[docker-compose.prod.yml](../docker-compose.prod.yml)** — Postgres plus the BookLab image, no Mailpit. SMTP and Stripe come from your `.env` file.
+Use **[docker-compose.prod.yml](../docker-compose.prod.yml)** - Postgres plus the BookLab image, no Mailpit. SMTP and Stripe come from your `.env` file.
 
 ## Steps
 
@@ -21,13 +21,13 @@ Use **[docker-compose.prod.yml](../docker-compose.prod.yml)** — Postgres plus 
 
    Required for production (see comments in [.env.example](../.env.example)):
 
-   - `POSTGRES_PASSWORD` — database password (must stay stable; changing it later does not rewrite files already in the Postgres data directory).
-   - Optional: `POSTGRES_DATA_PATH` — host path bind-mounted for Postgres (default `./data/postgres` next to `docker-compose.prod.yml`).
-   - `VITE_STRIPE_PUBLISHABLE_KEY` — Stripe **publishable** key; baked into the UI at **image build** time.
-   - `STRIPE_SECRET_KEY` — Stripe secret key.
-   - `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM` — real SMTP provider.
-   - `APP_URL` — public URL with scheme, e.g. `https://book.example.com` (email links and default CORS).
-   - `ADMIN_USER` / `ADMIN_PASS` — first-run bootstrap only; creates that admin if the username does not exist yet. Remove from `.env` after the first deploy if you prefer not to keep them on disk.
+   - `POSTGRES_PASSWORD` - database password (must stay stable; changing it later does not rewrite files already in the Postgres data directory).
+   - Optional: `POSTGRES_DATA_PATH` - host path bind-mounted for Postgres (default `./data/postgres` next to `docker-compose.prod.yml`).
+   - `VITE_STRIPE_PUBLISHABLE_KEY` - Stripe **publishable** key; baked into the UI at **image build** time.
+   - `STRIPE_SECRET_KEY` - Stripe secret key.
+   - `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM` - real SMTP provider.
+   - `APP_URL` - public URL with scheme, e.g. `https://book.example.com` (email links and default CORS).
+   - `ADMIN_USER` / `ADMIN_PASS` - first-run bootstrap only; creates that admin if the username does not exist yet. Remove from `.env` after the first deploy if you prefer not to keep them on disk.
 
    Optional: `STRIPE_WEBHOOK_SECRET` (reserved for future use), `CORS_ALLOWED_ORIGINS`, `APP_PUBLISH_PORT` (host port mapped to the app; default `8080`).
 
@@ -39,7 +39,7 @@ Use **[docker-compose.prod.yml](../docker-compose.prod.yml)** — Postgres plus 
    docker compose -f docker-compose.prod.yml up -d --build
    ```
 
-5. **TLS** — the app serves HTTP on the published port (default `8080`). Put a reverse proxy or load balancer in front (HTTPS → `http://127.0.0.1:8080` or your chosen `APP_PUBLISH_PORT`).
+5. **TLS** - the app serves HTTP on the published port (default `8080`). Put a reverse proxy or load balancer in front (HTTPS → `http://127.0.0.1:8080` or your chosen `APP_PUBLISH_PORT`).
 
    Example (Caddy):
 
