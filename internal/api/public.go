@@ -175,42 +175,6 @@ func (s *Server) handleCreateBooking(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Send confirmation email + staff notification
-	go func() {
-		data := emailsvc.ConfirmationData{
-			ResourceName: settings.ResourceName,
-			BookerName:   booking.Name,
-			StartTime:    booking.StartTime,
-			EndTime:      booking.EndTime,
-			CancelURL:    s.cfg.AppURL + "/cancel/" + booking.CancelToken.String(),
-			ViewURL:      s.cfg.AppURL + "/booking/" + booking.CancelToken.String(),
-			Timezone:     settings.Timezone,
-		}
-		if err := s.email.SendConfirmation(booking.Email, data); err != nil {
-			s.logger.Error("send confirmation email failed", "booking_id", booking.ID, "email", booking.Email, "error", err)
-		}
-
-		if settings.NotificationEmails != "" {
-			priorCount, _ := s.queries.CountPriorBookings(context.Background(), booking.Email, booking.ID)
-			staffData := emailsvc.StaffNewBookingData{
-				ResourceName:      settings.ResourceName,
-				BookerName:        booking.Name,
-				BookerEmail:       booking.Email,
-				StartTime:         booking.StartTime,
-				EndTime:           booking.EndTime,
-				IsReturnCustomer:  priorCount > 0,
-				PriorBookingCount: priorCount,
-				AdminURL:          s.cfg.AppURL + "/admin/bookings",
-				Timezone:          settings.Timezone,
-			}
-			for _, addr := range splitEmails(settings.NotificationEmails) {
-				if err := s.email.SendStaffNewBooking(addr, staffData); err != nil {
-					s.logger.Error("staff new booking email failed", "booking_id", booking.ID, "recipient", addr, "error", err)
-				}
-			}
-		}
-	}()
-
 	writeJSON(w, http.StatusCreated, map[string]any{
 		"booking":                    bookingToPublic(booking),
 		"setup_intent_client_secret": clientSecret,
@@ -274,6 +238,46 @@ func (s *Server) handleConfirmBookingCard(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	// Card confirmed — now safe to send confirmation and staff notification emails.
+	go func() {
+		settings, err := s.queries.GetSettings(context.Background())
+		if err != nil {
+			s.logger.Error("confirm-card: failed to load settings for emails", "booking_id", booking.ID, "error", err)
+			return
+		}
+		data := emailsvc.ConfirmationData{
+			ResourceName: settings.ResourceName,
+			BookerName:   booking.Name,
+			StartTime:    booking.StartTime,
+			EndTime:      booking.EndTime,
+			CancelURL:    s.cfg.AppURL + "/cancel/" + booking.CancelToken.String(),
+			ViewURL:      s.cfg.AppURL + "/booking/" + booking.CancelToken.String(),
+			Timezone:     settings.Timezone,
+		}
+		if err := s.email.SendConfirmation(booking.Email, data); err != nil {
+			s.logger.Error("send confirmation email failed", "booking_id", booking.ID, "email", booking.Email, "error", err)
+		}
+		if settings.NotificationEmails != "" {
+			priorCount, _ := s.queries.CountPriorBookings(context.Background(), booking.Email, booking.ID)
+			staffData := emailsvc.StaffNewBookingData{
+				ResourceName:      settings.ResourceName,
+				BookerName:        booking.Name,
+				BookerEmail:       booking.Email,
+				StartTime:         booking.StartTime,
+				EndTime:           booking.EndTime,
+				IsReturnCustomer:  priorCount > 0,
+				PriorBookingCount: priorCount,
+				AdminURL:          s.cfg.AppURL + "/admin/bookings",
+				Timezone:          settings.Timezone,
+			}
+			for _, addr := range splitEmails(settings.NotificationEmails) {
+				if err := s.email.SendStaffNewBooking(addr, staffData); err != nil {
+					s.logger.Error("staff new booking email failed", "booking_id", booking.ID, "recipient", addr, "error", err)
+				}
+			}
+		}
+	}()
+
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -294,38 +298,42 @@ func (s *Server) handleCancelBooking(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	settings, err := s.queries.GetSettings(r.Context())
-	if err == nil {
-		go func() {
-			data := emailsvc.CancellationData{
-				ResourceName: settings.ResourceName,
-				BookerName:   booking.Name,
-				StartTime:    booking.StartTime,
-				EndTime:      booking.EndTime,
-				Timezone:     settings.Timezone,
-			}
-			if err := s.email.SendCancellation(booking.Email, data); err != nil {
-				s.logger.Error("send cancellation email failed", "booking_id", booking.ID, "email", booking.Email, "error", err)
-			}
-		}()
+	// Only send cancellation emails for confirmed bookings (payment method on file).
+	// If there's no payment method, this is a cleanup after a failed card setup — no emails.
+	if booking.StripePaymentMethodID != nil {
+		settings, err := s.queries.GetSettings(r.Context())
+		if err == nil {
+			go func() {
+				data := emailsvc.CancellationData{
+					ResourceName: settings.ResourceName,
+					BookerName:   booking.Name,
+					StartTime:    booking.StartTime,
+					EndTime:      booking.EndTime,
+					Timezone:     settings.Timezone,
+				}
+				if err := s.email.SendCancellation(booking.Email, data); err != nil {
+					s.logger.Error("send cancellation email failed", "booking_id", booking.ID, "email", booking.Email, "error", err)
+				}
+			}()
 
-		if settings.NotificationEmails != "" {
-			staffData := emailsvc.StaffCancellationData{
-				ResourceName: settings.ResourceName,
-				BookerName:   booking.Name,
-				BookerEmail:  booking.Email,
-				StartTime:    booking.StartTime,
-				EndTime:      booking.EndTime,
-				AdminURL:     s.cfg.AppURL + "/admin/bookings",
-				Timezone:     settings.Timezone,
-			}
-			for _, addr := range splitEmails(settings.NotificationEmails) {
-				addr := addr
-				go func() {
-					if err := s.email.SendStaffCancellation(addr, staffData); err != nil {
-						s.logger.Error("staff cancellation email failed", "booking_id", booking.ID, "recipient", addr, "error", err)
-					}
-				}()
+			if settings.NotificationEmails != "" {
+				staffData := emailsvc.StaffCancellationData{
+					ResourceName: settings.ResourceName,
+					BookerName:   booking.Name,
+					BookerEmail:  booking.Email,
+					StartTime:    booking.StartTime,
+					EndTime:      booking.EndTime,
+					AdminURL:     s.cfg.AppURL + "/admin/bookings",
+					Timezone:     settings.Timezone,
+				}
+				for _, addr := range splitEmails(settings.NotificationEmails) {
+					addr := addr
+					go func() {
+						if err := s.email.SendStaffCancellation(addr, staffData); err != nil {
+							s.logger.Error("staff cancellation email failed", "booking_id", booking.ID, "recipient", addr, "error", err)
+						}
+					}()
+				}
 			}
 		}
 	}
