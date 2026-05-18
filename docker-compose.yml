@@ -25,7 +25,10 @@ services:
       - "8025:8025"   # Web UI → http://localhost:8025
 
   app:
-    build: .
+    build:
+      context: .
+      args:
+        VITE_STRIPE_PUBLISHABLE_KEY: ${VITE_STRIPE_PUBLISHABLE_KEY:-}
     restart: unless-stopped
     depends_on:
       db:

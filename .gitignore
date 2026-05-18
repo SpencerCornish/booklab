@@ -13,6 +13,9 @@ web/dist/
 .DS_Store
 tmp/
 
+# docker-compose.prod.yml Postgres bind mount (default ./data/postgres)
+data/postgres/
+
 # Keep go.sum versioned. Embed needs at least one file under dist/ when not running `make build-web`:
 internal/webembed/dist/*
 !internal/webembed/dist/placeholder.txt

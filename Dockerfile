@@ -5,6 +5,8 @@ WORKDIR /app/web
 COPY web/package.json web/pnpm-lock.yaml* ./
 RUN pnpm install --frozen-lockfile
 COPY web/ ./
+ARG VITE_STRIPE_PUBLISHABLE_KEY
+ENV VITE_STRIPE_PUBLISHABLE_KEY=${VITE_STRIPE_PUBLISHABLE_KEY}
 RUN pnpm run build
 
 # Stage 2: Build Go binary

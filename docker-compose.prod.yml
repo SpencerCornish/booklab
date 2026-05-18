@@ -1,0 +1,38 @@
+# Production stack: PostgreSQL + BookLab (no Mailpit).
+# 1. cp .env.example .env
+# 2. Fill every value in .env (see comments in .env.example)
+# 3. docker compose -f docker-compose.prod.yml up -d --build
+#
+# Put TLS in front of the published HTTP port (e.g. Caddy → 127.0.0.1:8080).
+# Postgres files live on the host under POSTGRES_DATA_PATH (default ./data/postgres).
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: booklab
+      POSTGRES_USER: booklab
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    volumes:
+      - ${POSTGRES_DATA_PATH:-./data/postgres}:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U booklab"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build:
+      context: .
+      args:
+        VITE_STRIPE_PUBLISHABLE_KEY: ${VITE_STRIPE_PUBLISHABLE_KEY:?Set VITE_STRIPE_PUBLISHABLE_KEY in .env for the booking UI}
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "${APP_PUBLISH_PORT:-8080}:8080"
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://booklab:${POSTGRES_PASSWORD}@db:5432/booklab?sslmode=disable
