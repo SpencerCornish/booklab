@@ -1,0 +1,1 @@
+ALTER TABLE bookings ADD COLUMN metadata JSONB NOT NULL DEFAULT '{}';

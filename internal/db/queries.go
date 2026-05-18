@@ -79,12 +79,12 @@ func scanSettings(row pgx.Row) (*Settings, error) {
 
 // ----- Bookings -----
 
-func (q *Queries) CreateBooking(ctx context.Context, name, email string, start, end time.Time, setupIntentID string) (*Booking, error) {
+func (q *Queries) CreateBooking(ctx context.Context, name, email string, metadata map[string]string, start, end time.Time, setupIntentID string) (*Booking, error) {
 	row := q.pool.QueryRow(ctx, `
-		INSERT INTO bookings (name, email, start_time, end_time, stripe_setup_intent_id)
-		VALUES ($1, $2, $3, $4, $5)
+		INSERT INTO bookings (name, email, metadata, start_time, end_time, stripe_setup_intent_id)
+		VALUES ($1, $2, $3, $4, $5, $6)
 		RETURNING `+bookingColumns,
-		name, email, start, end, setupIntentID,
+		name, email, metadata, start, end, setupIntentID,
 	)
 	return scanBooking(row)
 }
@@ -187,6 +187,22 @@ func (q *Queries) UpdateBookingCharged(ctx context.Context, id int32, paymentInt
 	return scanBooking(row)
 }
 
+// CompleteExpiredBookings transitions all confirmed bookings whose end_time has
+// passed (and have a payment method on file) to completed, returning them so
+// the caller can send staff notification emails.
+func (q *Queries) CompleteExpiredBookings(ctx context.Context) ([]*Booking, error) {
+	rows, err := q.pool.Query(ctx, `
+		UPDATE bookings SET status = 'completed', completed_at = NOW()
+		WHERE status = 'confirmed'
+		  AND end_time < NOW()
+		  AND stripe_payment_method_id IS NOT NULL
+		RETURNING `+bookingColumns)
+	if err != nil {
+		return nil, err
+	}
+	return collectBookings(rows)
+}
+
 // ClaimBookingForCharge atomically marks a completed, unpaid booking as charging.
 // Returns pgx.ErrNoRows if the booking is missing or not eligible.
 func (q *Queries) ClaimBookingForCharge(ctx context.Context, id int32) (*Booking, error) {
@@ -281,14 +297,14 @@ func (q *Queries) CancelBooking(ctx context.Context, token uuid.UUID) (*Booking,
 	return scanBooking(row)
 }
 
-const bookingColumns = `id, name, email, start_time, end_time, status, cancel_token,
+const bookingColumns = `id, name, email, metadata, start_time, end_time, status, cancel_token,
 	stripe_setup_intent_id, stripe_payment_method_id, stripe_payment_intent_id,
 	stripe_receipt_url, amount_cents, reminder_sent, completed_at, created_at, updated_at`
 
 func scanBooking(row pgx.Row) (*Booking, error) {
 	var b Booking
 	err := row.Scan(
-		&b.ID, &b.Name, &b.Email, &b.StartTime, &b.EndTime, &b.Status, &b.CancelToken,
+		&b.ID, &b.Name, &b.Email, &b.Metadata, &b.StartTime, &b.EndTime, &b.Status, &b.CancelToken,
 		&b.StripeSetupIntentID, &b.StripePaymentMethodID, &b.StripePaymentIntentID,
 		&b.StripeReceiptURL, &b.AmountCents, &b.ReminderSent, &b.CompletedAt,
 		&b.CreatedAt, &b.UpdatedAt,

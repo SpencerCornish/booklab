@@ -20,22 +20,23 @@ const (
 )
 
 type Booking struct {
-	ID                    int32         `json:"id"`
-	Name                  string        `json:"name"`
-	Email                 string        `json:"email"`
-	StartTime             time.Time     `json:"start_time"`
-	EndTime               time.Time     `json:"end_time"`
-	Status                BookingStatus `json:"status"`
-	CancelToken           uuid.UUID     `json:"cancel_token"`
-	StripeSetupIntentID   *string       `json:"stripe_setup_intent_id"`
-	StripePaymentMethodID *string       `json:"stripe_payment_method_id"`
-	StripePaymentIntentID *string       `json:"stripe_payment_intent_id"`
-	StripeReceiptURL      *string       `json:"stripe_receipt_url"`
-	AmountCents           *int32        `json:"amount_cents"`
-	ReminderSent          bool          `json:"reminder_sent"`
-	CompletedAt           *time.Time    `json:"completed_at"`
-	CreatedAt             time.Time     `json:"created_at"`
-	UpdatedAt             time.Time     `json:"updated_at"`
+	ID                    int32             `json:"id"`
+	Name                  string            `json:"name"`
+	Email                 string            `json:"email"`
+	Metadata              map[string]string `json:"metadata"`
+	StartTime             time.Time         `json:"start_time"`
+	EndTime               time.Time         `json:"end_time"`
+	Status                BookingStatus     `json:"status"`
+	CancelToken           uuid.UUID         `json:"cancel_token"`
+	StripeSetupIntentID   *string           `json:"stripe_setup_intent_id"`
+	StripePaymentMethodID *string           `json:"stripe_payment_method_id"`
+	StripePaymentIntentID *string           `json:"stripe_payment_intent_id"`
+	StripeReceiptURL      *string           `json:"stripe_receipt_url"`
+	AmountCents           *int32            `json:"amount_cents"`
+	ReminderSent          bool              `json:"reminder_sent"`
+	CompletedAt           *time.Time        `json:"completed_at"`
+	CreatedAt             time.Time         `json:"created_at"`
+	UpdatedAt             time.Time         `json:"updated_at"`
 }
 
 type Closure struct {

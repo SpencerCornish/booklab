@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -59,9 +60,44 @@ func (s *Scheduler) runOnce(ctx context.Context) {
 		return
 	}
 
+	completed := s.completeExpiredBookings(ctx, settings)
 	remindersSent := s.sendReminders(ctx, settings)
 	chargesOK := s.autoChargeCompleted(ctx, settings)
-	s.logger.Info("scheduler_tick_completed", "reminders_sent", remindersSent, "charges_succeeded", chargesOK)
+	s.logger.Info("scheduler_tick_completed", "bookings_completed", completed, "reminders_sent", remindersSent, "charges_succeeded", chargesOK)
+}
+
+func (s *Scheduler) completeExpiredBookings(ctx context.Context, settings *db.Settings) int {
+	bookings, err := s.queries.CompleteExpiredBookings(ctx)
+	if err != nil {
+		s.logger.Error("scheduler complete expired bookings failed", "error", err)
+		return 0
+	}
+	for _, b := range bookings {
+		b := b
+		go func() {
+			hours := int32(b.EndTime.Sub(b.StartTime).Hours())
+			if hours < 1 {
+				hours = 1
+			}
+			staffData := email.StaffCompletionData{
+				ResourceName:    settings.ResourceName,
+				BookerName:      b.Name,
+				BookerEmail:     b.Email,
+				StartTime:       b.StartTime,
+				EndTime:         b.EndTime,
+				AutoAmountCents: hours * settings.HourlyRateCents,
+				AutoChargeAt:    b.EndTime.Add(24 * time.Hour),
+				AdminURL:        s.appURL + "/admin/bookings",
+				Timezone:        settings.Timezone,
+			}
+			for _, addr := range splitEmails(settings.NotificationEmails) {
+				if err := s.email.SendStaffCompletion(addr, staffData); err != nil {
+					s.logger.Error("scheduler send staff completion email failed", "booking_id", b.ID, "recipient", addr, "error", err)
+				}
+			}
+		}()
+	}
+	return len(bookings)
 }
 
 func (s *Scheduler) sendReminders(ctx context.Context, settings *db.Settings) int {
@@ -92,6 +128,17 @@ func (s *Scheduler) sendReminders(ctx context.Context, settings *db.Settings) in
 		sent++
 	}
 	return sent
+}
+
+func splitEmails(s string) []string {
+	var out []string
+	for _, addr := range strings.Split(s, ",") {
+		addr = strings.TrimSpace(addr)
+		if addr != "" {
+			out = append(out, addr)
+		}
+	}
+	return out
 }
 
 // $200 is a safe max for now

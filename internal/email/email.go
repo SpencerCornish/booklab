@@ -98,6 +98,7 @@ type StaffNewBookingData struct {
 	ResourceName      string
 	BookerName        string
 	BookerEmail       string
+	Metadata          map[string]string
 	StartTime         time.Time
 	EndTime           time.Time
 	IsReturnCustomer  bool
@@ -110,6 +111,7 @@ type StaffCancellationData struct {
 	ResourceName string
 	BookerName   string
 	BookerEmail  string
+	Metadata     map[string]string
 	StartTime    time.Time
 	EndTime      time.Time
 	AdminURL     string

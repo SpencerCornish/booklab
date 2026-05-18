@@ -126,10 +126,11 @@ func (s *Server) handleGetAvailability(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleCreateBooking(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Name      string    `json:"name"`
-		Email     string    `json:"email"`
-		StartTime time.Time `json:"start_time"`
-		EndTime   time.Time `json:"end_time"`
+		Name      string            `json:"name"`
+		Email     string            `json:"email"`
+		Metadata  map[string]string `json:"metadata"`
+		StartTime time.Time         `json:"start_time"`
+		EndTime   time.Time         `json:"end_time"`
 	}
 	if !s.readJSONRequest(w, r, &req) {
 		return
@@ -137,6 +138,9 @@ func (s *Server) handleCreateBooking(w http.ResponseWriter, r *http.Request) {
 	if req.Name == "" || req.Email == "" {
 		s.writeError(w, r, http.StatusBadRequest, "name and email are required", nil)
 		return
+	}
+	if req.Metadata == nil {
+		req.Metadata = map[string]string{}
 	}
 	if req.EndTime.Before(req.StartTime) || req.EndTime.Equal(req.StartTime) {
 		s.writeError(w, r, http.StatusBadRequest, "end_time must be after start_time", nil)
@@ -164,7 +168,7 @@ func (s *Server) handleCreateBooking(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	booking, err := s.queries.CreateBooking(r.Context(), req.Name, req.Email, req.StartTime, req.EndTime, setupIntentID)
+	booking, err := s.queries.CreateBooking(r.Context(), req.Name, req.Email, req.Metadata, req.StartTime, req.EndTime, setupIntentID)
 	if err != nil {
 		// Check for exclusion constraint violation (conflict)
 		if isConflictError(err) {
@@ -263,6 +267,7 @@ func (s *Server) handleConfirmBookingCard(w http.ResponseWriter, r *http.Request
 				ResourceName:      settings.ResourceName,
 				BookerName:        booking.Name,
 				BookerEmail:       booking.Email,
+				Metadata:          booking.Metadata,
 				StartTime:         booking.StartTime,
 				EndTime:           booking.EndTime,
 				IsReturnCustomer:  priorCount > 0,
@@ -317,15 +322,16 @@ func (s *Server) handleCancelBooking(w http.ResponseWriter, r *http.Request) {
 			}()
 
 			if settings.NotificationEmails != "" {
-				staffData := emailsvc.StaffCancellationData{
-					ResourceName: settings.ResourceName,
-					BookerName:   booking.Name,
-					BookerEmail:  booking.Email,
-					StartTime:    booking.StartTime,
-					EndTime:      booking.EndTime,
-					AdminURL:     s.cfg.AppURL + "/admin/bookings",
-					Timezone:     settings.Timezone,
-				}
+			staffData := emailsvc.StaffCancellationData{
+				ResourceName: settings.ResourceName,
+				BookerName:   booking.Name,
+				BookerEmail:  booking.Email,
+				Metadata:     booking.Metadata,
+				StartTime:    booking.StartTime,
+				EndTime:      booking.EndTime,
+				AdminURL:     s.cfg.AppURL + "/admin/bookings",
+				Timezone:     settings.Timezone,
+			}
 				for _, addr := range splitEmails(settings.NotificationEmails) {
 					addr := addr
 					go func() {
@@ -458,6 +464,7 @@ func bookingToPublic(b *db.Booking) map[string]any {
 		"id":           b.ID,
 		"name":         b.Name,
 		"email":        b.Email,
+		"metadata":     b.Metadata,
 		"start_time":   b.StartTime,
 		"end_time":     b.EndTime,
 		"status":       b.Status,

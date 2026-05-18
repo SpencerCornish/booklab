@@ -54,6 +54,7 @@ export const getAvailability = (date: string) =>
 export const createBooking = (body: {
   name: string
   email: string
+  metadata?: Record<string, string>
   start_time: string
   end_time: string
 }) =>

@@ -8,7 +8,10 @@
     <p style="margin:0 0 8px;"><strong>Name:</strong> {{.BookerName}}</p>
     <p style="margin:0 0 8px;"><strong>Email:</strong> {{.BookerEmail}}</p>
     <p style="margin:0 0 8px;"><strong>Start:</strong> {{formatTime .StartTime .Timezone}}</p>
-    <p style="margin:0;"><strong>End:</strong> {{formatTime .EndTime .Timezone}}</p>
+    <p style="margin:0 0 8px;"><strong>End:</strong> {{formatTime .EndTime .Timezone}}</p>
+    {{range $k, $v := .Metadata}}{{if $v}}
+    <p style="margin:0 0 8px;"><strong>{{$k}}:</strong> {{$v}}</p>
+    {{end}}{{end}}
   </div>
 
   <p style="margin:20px 0;">
