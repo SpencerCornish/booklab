@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"html/template"
 	"log/slog"
+	"net/mail"
 	"net/smtp"
 	"strings"
 	"time"
@@ -145,7 +146,7 @@ func (s *Service) send(to, subject, tmplName string, data any) error {
 		auth = smtp.PlainAuth("", s.user, s.pass, s.host)
 	}
 	s.logger.Info("sending email", "template", tmplName, "smtp_host", addr, "recipient", to)
-	if err := s.sendMail(addr, auth, s.from, []string{to}, []byte(msg)); err != nil {
+	if err := s.sendMail(addr, auth, envelopeAddr(s.from), []string{to}, []byte(msg)); err != nil {
 		s.logger.Error("email send failed", "template", tmplName, "smtp_host", addr, "recipient", to, "error", err)
 		return err
 	}
@@ -193,6 +194,17 @@ func (s *Service) sendMail(addr string, auth smtp.Auth, from string, to []string
 	return smtp.SendMail(addr, auth, from, to, msg)
 }
 
+
+// envelopeAddr extracts the bare email address from a From value that may
+// include a display name (e.g. "BookLab <noreply@example.com>"). The SMTP
+// MAIL FROM command accepts only a bare address; display names are only valid
+// inside message headers.
+func envelopeAddr(from string) string {
+	if addr, err := mail.ParseAddress(from); err == nil {
+		return addr.Address
+	}
+	return from
+}
 
 func sanitizeHeader(s string) string {
 	return strings.NewReplacer("\r", "", "\n", "").Replace(s)
