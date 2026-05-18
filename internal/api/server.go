@@ -3,7 +3,9 @@ package api
 import (
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -21,16 +23,50 @@ type Server struct {
 	stripe  stripesvc.Client
 	email   *emailsvc.Service
 	webFS   fs.FS
+	logger  *slog.Logger
 }
 
-func New(cfg *config.Config, queries *db.Queries, stripe stripesvc.Client, email *emailsvc.Service, webFS fs.FS) *Server {
-	return &Server{cfg: cfg, queries: queries, stripe: stripe, email: email, webFS: webFS}
+func New(cfg *config.Config, queries *db.Queries, stripe stripesvc.Client, email *emailsvc.Service, webFS fs.FS, log *slog.Logger) *Server {
+	if log == nil {
+		log = slog.Default()
+	}
+	return &Server{
+		cfg: cfg, queries: queries, stripe: stripe, email: email, webFS: webFS,
+		logger: log.With("component", "api"),
+	}
+}
+
+func (s *Server) slogRequestLogger(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		ww := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
+		next.ServeHTTP(ww, r)
+		status := ww.Status()
+		if status == 0 {
+			status = 200
+		}
+		attrs := []any{
+			"method", r.Method,
+			"path", r.URL.Path,
+			"status", status,
+			"duration_ms", time.Since(start).Milliseconds(),
+			"remote_addr", r.RemoteAddr,
+		}
+		switch {
+		case status >= 500:
+			s.logger.Error("http_request", attrs...)
+		case status >= 400:
+			s.logger.Warn("http_request", attrs...)
+		default:
+			s.logger.Info("http_request", attrs...)
+		}
+	})
 }
 
 func (s *Server) Handler() http.Handler {
 	r := chi.NewRouter()
 
-	r.Use(middleware.Logger)
+	r.Use(s.slogRequestLogger)
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.RealIP)
 	r.Use(cors.Handler(cors.Options{
@@ -76,6 +112,7 @@ func (s *Server) Handler() http.Handler {
 
 func (s *Server) handleSPA(w http.ResponseWriter, r *http.Request) {
 	if s.webFS == nil {
+		s.logger.Warn("spa_not_available", "path", r.URL.Path)
 		http.Error(w, "frontend not built", http.StatusServiceUnavailable)
 		return
 	}

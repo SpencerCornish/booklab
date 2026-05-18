@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -18,7 +17,7 @@ import (
 func (s *Server) handleGetPublicSettings(w http.ResponseWriter, r *http.Request) {
 	settings, err := s.queries.GetSettings(r.Context())
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to load settings")
+		s.writeError(w, r, http.StatusInternalServerError, "failed to load settings", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -36,13 +35,13 @@ func (s *Server) handleGetPublicSettings(w http.ResponseWriter, r *http.Request)
 func (s *Server) handleGetAvailability(w http.ResponseWriter, r *http.Request) {
 	dateStr := r.URL.Query().Get("date")
 	if dateStr == "" {
-		writeError(w, http.StatusBadRequest, "date is required (YYYY-MM-DD)")
+		s.writeError(w, r, http.StatusBadRequest, "date is required (YYYY-MM-DD)", nil)
 		return
 	}
 
 	settings, err := s.queries.GetSettings(r.Context())
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to load settings")
+		s.writeError(w, r, http.StatusInternalServerError, "failed to load settings", err)
 		return
 	}
 
@@ -53,14 +52,14 @@ func (s *Server) handleGetAvailability(w http.ResponseWriter, r *http.Request) {
 
 	date, err := time.ParseInLocation("2006-01-02", dateStr, loc)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid date format, use YYYY-MM-DD")
+		s.writeError(w, r, http.StatusBadRequest, "invalid date format, use YYYY-MM-DD", err)
 		return
 	}
 
 	// Check if the date falls in a closure
 	closures, err := s.queries.ListClosuresInRange(r.Context(), date, date.AddDate(0, 0, 1))
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to load closures")
+		s.writeError(w, r, http.StatusInternalServerError, "failed to load closures", err)
 		return
 	}
 
@@ -90,7 +89,7 @@ func (s *Server) handleGetAvailability(w http.ResponseWriter, r *http.Request) {
 	// Get existing bookings for this day
 	bookings, err := s.queries.ListBookingsInRange(r.Context(), dayStart, dayEnd.Add(time.Hour))
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to load bookings")
+		s.writeError(w, r, http.StatusInternalServerError, "failed to load bookings", err)
 		return
 	}
 
@@ -132,36 +131,36 @@ func (s *Server) handleCreateBooking(w http.ResponseWriter, r *http.Request) {
 		StartTime time.Time `json:"start_time"`
 		EndTime   time.Time `json:"end_time"`
 	}
-	if !readJSONRequest(w, r, &req) {
+	if !s.readJSONRequest(w, r, &req) {
 		return
 	}
 	if req.Name == "" || req.Email == "" {
-		writeError(w, http.StatusBadRequest, "name and email are required")
+		s.writeError(w, r, http.StatusBadRequest, "name and email are required", nil)
 		return
 	}
 	if req.EndTime.Before(req.StartTime) || req.EndTime.Equal(req.StartTime) {
-		writeError(w, http.StatusBadRequest, "end_time must be after start_time")
+		s.writeError(w, r, http.StatusBadRequest, "end_time must be after start_time", nil)
 		return
 	}
 
 	settings, err := s.queries.GetSettings(r.Context())
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to load settings")
+		s.writeError(w, r, http.StatusInternalServerError, "failed to load settings", err)
 		return
 	}
 
 	if badReq, err := s.validateBookingCreate(r.Context(), req.StartTime, req.EndTime, settings); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to validate booking")
+		s.writeError(w, r, http.StatusInternalServerError, "failed to validate booking", err)
 		return
 	} else if badReq != "" {
-		writeError(w, http.StatusBadRequest, badReq)
+		s.writeError(w, r, http.StatusBadRequest, badReq, nil)
 		return
 	}
 
 	// Create Stripe SetupIntent
 	setupIntentID, clientSecret, err := s.stripe.CreateSetupIntent(req.Email)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to create payment setup")
+		s.writeError(w, r, http.StatusInternalServerError, "failed to create payment setup", err)
 		return
 	}
 
@@ -169,10 +168,10 @@ func (s *Server) handleCreateBooking(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		// Check for exclusion constraint violation (conflict)
 		if isConflictError(err) {
-			writeError(w, http.StatusConflict, "this time slot is no longer available")
+			s.writeError(w, r, http.StatusConflict, "this time slot is no longer available", err)
 			return
 		}
-		writeError(w, http.StatusInternalServerError, "failed to create booking")
+		s.writeError(w, r, http.StatusInternalServerError, "failed to create booking", err)
 		return
 	}
 
@@ -187,7 +186,7 @@ func (s *Server) handleCreateBooking(w http.ResponseWriter, r *http.Request) {
 			ViewURL:      s.cfg.AppURL + "/booking/" + booking.CancelToken.String(),
 		}
 		if err := s.email.SendConfirmation(booking.Email, data); err != nil {
-			_ = err
+			s.logger.Error("send confirmation email failed", "booking_id", booking.ID, "email", booking.Email, "error", err)
 		}
 
 		if settings.NotificationEmails != "" {
@@ -204,7 +203,7 @@ func (s *Server) handleCreateBooking(w http.ResponseWriter, r *http.Request) {
 			}
 			for _, addr := range splitEmails(settings.NotificationEmails) {
 				if err := s.email.SendStaffNewBooking(addr, staffData); err != nil {
-					log.Printf("staff new booking email to %s: %v", addr, err)
+					s.logger.Error("staff new booking email failed", "booking_id", booking.ID, "recipient", addr, "error", err)
 				}
 			}
 		}
@@ -219,16 +218,16 @@ func (s *Server) handleCreateBooking(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleGetBooking(w http.ResponseWriter, r *http.Request) {
 	token, err := uuid.Parse(chi.URLParam(r, "token"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid token")
+		s.writeError(w, r, http.StatusBadRequest, "invalid token", err)
 		return
 	}
 	booking, err := s.queries.GetBookingByToken(r.Context(), token)
 	if err != nil {
 		if err == pgx.ErrNoRows {
-			writeError(w, http.StatusNotFound, "booking not found")
+			s.writeError(w, r, http.StatusNotFound, "booking not found", err)
 			return
 		}
-		writeError(w, http.StatusInternalServerError, "failed to load booking")
+		s.writeError(w, r, http.StatusInternalServerError, "failed to load booking", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, bookingToPublic(booking))
@@ -237,17 +236,17 @@ func (s *Server) handleGetBooking(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleConfirmBookingCard(w http.ResponseWriter, r *http.Request) {
 	token, err := uuid.Parse(chi.URLParam(r, "token"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid token")
+		s.writeError(w, r, http.StatusBadRequest, "invalid token", err)
 		return
 	}
 
 	booking, err := s.queries.GetBookingByToken(r.Context(), token)
 	if err != nil {
 		if err == pgx.ErrNoRows {
-			writeError(w, http.StatusNotFound, "booking not found")
+			s.writeError(w, r, http.StatusNotFound, "booking not found", err)
 			return
 		}
-		writeError(w, http.StatusInternalServerError, "failed to load booking")
+		s.writeError(w, r, http.StatusInternalServerError, "failed to load booking", err)
 		return
 	}
 
@@ -258,18 +257,18 @@ func (s *Server) handleConfirmBookingCard(w http.ResponseWriter, r *http.Request
 	}
 
 	if booking.StripeSetupIntentID == nil {
-		writeError(w, http.StatusBadRequest, "no setup intent on booking")
+		s.writeError(w, r, http.StatusBadRequest, "no setup intent on booking", nil)
 		return
 	}
 
 	pmID, err := s.stripe.GetPaymentMethodFromSetupIntent(*booking.StripeSetupIntentID)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "card not yet confirmed")
+		s.writeError(w, r, http.StatusBadRequest, "card not yet confirmed", err)
 		return
 	}
 
 	if _, err := s.queries.UpdateBookingPaymentMethod(r.Context(), booking.ID, pmID); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to save payment method")
+		s.writeError(w, r, http.StatusInternalServerError, "failed to save payment method", err)
 		return
 	}
 
@@ -279,17 +278,17 @@ func (s *Server) handleConfirmBookingCard(w http.ResponseWriter, r *http.Request
 func (s *Server) handleCancelBooking(w http.ResponseWriter, r *http.Request) {
 	token, err := uuid.Parse(chi.URLParam(r, "token"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid token")
+		s.writeError(w, r, http.StatusBadRequest, "invalid token", err)
 		return
 	}
 
 	booking, err := s.queries.CancelBooking(r.Context(), token)
 	if err != nil {
 		if err == pgx.ErrNoRows {
-			writeError(w, http.StatusConflict, "booking not found or cannot be cancelled")
+			s.writeError(w, r, http.StatusConflict, "booking not found or cannot be cancelled", err)
 			return
 		}
-		writeError(w, http.StatusInternalServerError, "failed to cancel booking")
+		s.writeError(w, r, http.StatusInternalServerError, "failed to cancel booking", err)
 		return
 	}
 
@@ -302,13 +301,19 @@ func (s *Server) handleCancelBooking(w http.ResponseWriter, r *http.Request) {
 				StartTime:    booking.StartTime,
 				EndTime:      booking.EndTime,
 			}
-			_ = s.email.SendCancellation(booking.Email, data)
+			if err := s.email.SendCancellation(booking.Email, data); err != nil {
+				s.logger.Error("send cancellation email failed", "booking_id", booking.ID, "email", booking.Email, "error", err)
+			}
 		}()
 	}
 
 	// Detach payment method if present
 	if booking.StripePaymentMethodID != nil {
-		go func() { _ = s.stripe.DetachPaymentMethod(*booking.StripePaymentMethodID) }()
+		go func() {
+			if err := s.stripe.DetachPaymentMethod(*booking.StripePaymentMethodID); err != nil {
+				s.logger.Error("stripe detach on cancel failed", "booking_id", booking.ID, "payment_method_id", *booking.StripePaymentMethodID, "error", err)
+			}
+		}()
 	}
 
 	writeJSON(w, http.StatusOK, bookingToPublic(booking))

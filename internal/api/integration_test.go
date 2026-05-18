@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"log/slog"
 	"os"
 	"sync"
 	"testing"
@@ -11,6 +12,10 @@ import (
 
 	"github.com/spencercornish/booklab/internal/db"
 )
+
+func testLogger() *slog.Logger {
+	return slog.New(slog.DiscardHandler())
+}
 
 // testDSN returns a Postgres URL for integration tests. When unset, callers should t.Skip.
 func testDSN() string {

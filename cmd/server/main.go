@@ -2,9 +2,8 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"io/fs"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 
@@ -23,18 +22,22 @@ import (
 func main() {
 	_ = godotenv.Load()
 
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	slog.SetDefault(logger)
+
 	cfg := config.Load()
 
 	ctx := context.Background()
 	pool, err := db.Connect(ctx, cfg.DatabaseURL)
 	if err != nil {
-		log.Fatalf("database: %v", err)
+		slog.Error("database connect failed", "error", err)
+		os.Exit(1)
 	}
 	defer pool.Close()
 
 	queries := db.New(pool)
-	stripeService := stripesvc.New(cfg.StripeSecretKey)
-	emailService := emailsvc.New(cfg.SMTPHost, cfg.SMTPPort, cfg.SMTPUser, cfg.SMTPPass, cfg.SMTPFrom)
+	stripeService := stripesvc.New(cfg.StripeSecretKey, logger)
+	emailService := emailsvc.New(cfg.SMTPHost, cfg.SMTPPort, cfg.SMTPUser, cfg.SMTPPass, cfg.SMTPFrom, logger)
 
 	if user := os.Getenv("ADMIN_USER"); user != "" {
 		if pass := os.Getenv("ADMIN_PASS"); pass != "" {
@@ -42,7 +45,7 @@ func main() {
 		}
 	}
 
-	sched := scheduler.New(queries, emailService, stripeService, cfg.AppURL)
+	sched := scheduler.New(queries, emailService, stripeService, cfg.AppURL, logger)
 	go sched.Start(ctx)
 
 	// webFS: prefer embedded FS (populated at build time), fall back to disk
@@ -52,15 +55,16 @@ func main() {
 		if _, err := os.Stat(distDir + "/index.html"); err == nil {
 			webFS = os.DirFS(distDir)
 		} else {
-			log.Printf("warning: %s/index.html not found — SPA will not be served", distDir)
+			slog.Warn("spa dist missing", "path", distDir+"/index.html")
 		}
 	}
 
-	srv := api.New(cfg, queries, stripeService, emailService, webFS)
+	srv := api.New(cfg, queries, stripeService, emailService, webFS, logger)
 	addr := srv.Addr()
-	log.Printf("BookLab listening on %s", addr)
+	slog.Info("booklab listening", "addr", addr)
 	if err := http.ListenAndServe(addr, srv.Handler()); err != nil {
-		log.Fatalf("server: %v", err)
+		slog.Error("http server failed", "error", err)
+		os.Exit(1)
 	}
 }
 
@@ -70,11 +74,12 @@ func bootstrapAdmin(ctx context.Context, queries *db.Queries, username, password
 	}
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
-		log.Fatalf("bcrypt: %v", err)
+		slog.Error("bootstrap admin bcrypt failed", "error", err)
+		os.Exit(1)
 	}
 	if _, err := queries.CreateAdminUser(ctx, username, string(hash)); err != nil {
-		log.Printf("bootstrap admin: %v", err)
+		slog.Error("bootstrap admin create failed", "username", username, "error", err)
 	} else {
-		fmt.Printf("Created admin user: %s\n", username)
+		slog.Info("bootstrap admin created", "username", username)
 	}
 }

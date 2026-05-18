@@ -22,8 +22,8 @@ func TestCreateBooking_requestBodyExceedsLimit(t *testing.T) {
 	resetSettingsUTC(t, ctx, q)
 
 	ms := &mockStripe{}
-	emailSvc := emailsvc.New("127.0.0.1", 1025, "", "", "booklab@localhost")
-	srv := New(testConfig(), q, ms, emailSvc, nil)
+	emailSvc := emailsvc.New("127.0.0.1", 1025, "", "", "booklab@localhost", testLogger())
+	srv := New(testConfig(), q, ms, emailSvc, nil, testLogger())
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 
@@ -45,7 +45,7 @@ func TestValidateBookingCreate_rejectsPastStart(t *testing.T) {
 	truncateBookingData(t, ctx, pool)
 	resetSettingsUTC(t, ctx, q)
 
-	s := &Server{queries: q, cfg: testConfig()}
+	s := &Server{queries: q, cfg: testConfig(), logger: testLogger()}
 	settings, err := q.GetSettings(ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -67,7 +67,7 @@ func TestValidateBookingCreate_rejectsOutsideBookableHours(t *testing.T) {
 	truncateBookingData(t, ctx, pool)
 	resetSettingsUTC(t, ctx, q)
 
-	s := &Server{queries: q, cfg: testConfig()}
+	s := &Server{queries: q, cfg: testConfig(), logger: testLogger()}
 	settings, err := q.GetSettings(ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -90,7 +90,7 @@ func TestValidateBookingCreate_rejectsUnderMinDuration(t *testing.T) {
 	truncateBookingData(t, ctx, pool)
 	resetSettingsUTC(t, ctx, q)
 
-	s := &Server{queries: q, cfg: testConfig()}
+	s := &Server{queries: q, cfg: testConfig(), logger: testLogger()}
 	settings, err := q.GetSettings(ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -130,7 +130,7 @@ func TestValidateBookingCreate_rejectsOverMaxDuration(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	s := &Server{queries: q, cfg: testConfig()}
+	s := &Server{queries: q, cfg: testConfig(), logger: testLogger()}
 	start := time.Date(2035, 7, 12, 11, 0, 0, 0, time.UTC)
 	end := start.Add(4 * time.Hour)
 	bad, err := s.validateBookingCreate(ctx, start, end, settings)
@@ -154,7 +154,7 @@ func TestValidateBookingCreate_rejectsClosureOverlap(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	s := &Server{queries: q, cfg: testConfig()}
+	s := &Server{queries: q, cfg: testConfig(), logger: testLogger()}
 	settings, err := q.GetSettings(ctx)
 	if err != nil {
 		t.Fatal(err)

@@ -33,8 +33,8 @@ func TestAdminChargeBooking_idempotentSecondRequest(t *testing.T) {
 	resetSettingsUTC(t, ctx, q)
 
 	ms := &mockStripe{}
-	emailSvc := emailsvc.New("127.0.0.1", 1025, "", "", "booklab@localhost")
-	srv := New(testConfig(), q, ms, emailSvc, nil)
+	emailSvc := emailsvc.New("127.0.0.1", 1025, "", "", "booklab@localhost", testLogger())
+	srv := New(testConfig(), q, ms, emailSvc, nil, testLogger())
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 
@@ -99,8 +99,8 @@ func TestAdminCSRF_mutatingWithoutHeader(t *testing.T) {
 	resetSettingsUTC(t, ctx, q)
 
 	ms := &mockStripe{}
-	emailSvc := emailsvc.New("127.0.0.1", 1025, "", "", "booklab@localhost")
-	srv := New(testConfig(), q, ms, emailSvc, nil)
+	emailSvc := emailsvc.New("127.0.0.1", 1025, "", "", "booklab@localhost", testLogger())
+	srv := New(testConfig(), q, ms, emailSvc, nil, testLogger())
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 
@@ -142,8 +142,8 @@ func TestCORS_disallowedOriginNoACAO(t *testing.T) {
 	truncateBookingData(t, ctx, pool)
 
 	ms := &mockStripe{}
-	emailSvc := emailsvc.New("127.0.0.1", 1025, "", "", "booklab@localhost")
-	srv := New(testConfig(), q, ms, emailSvc, nil)
+	emailSvc := emailsvc.New("127.0.0.1", 1025, "", "", "booklab@localhost", testLogger())
+	srv := New(testConfig(), q, ms, emailSvc, nil, testLogger())
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 
@@ -166,8 +166,8 @@ func TestCORS_allowedOriginReflectsACAO(t *testing.T) {
 	truncateBookingData(t, ctx, pool)
 
 	ms := &mockStripe{}
-	emailSvc := emailsvc.New("127.0.0.1", 1025, "", "", "booklab@localhost")
-	srv := New(testConfig(), q, ms, emailSvc, nil)
+	emailSvc := emailsvc.New("127.0.0.1", 1025, "", "", "booklab@localhost", testLogger())
+	srv := New(testConfig(), q, ms, emailSvc, nil, testLogger())
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 
@@ -189,8 +189,8 @@ func TestAdminLogin_bruteForce429(t *testing.T) {
 	truncateBookingData(t, ctx, pool)
 
 	ms := &mockStripe{}
-	emailSvc := emailsvc.New("127.0.0.1", 1025, "", "", "booklab@localhost")
-	srv := New(testConfig(), q, ms, emailSvc, nil)
+	emailSvc := emailsvc.New("127.0.0.1", 1025, "", "", "booklab@localhost", testLogger())
+	srv := New(testConfig(), q, ms, emailSvc, nil, testLogger())
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 
@@ -225,8 +225,8 @@ func TestAdminLogout_revokesSession(t *testing.T) {
 	resetSettingsUTC(t, ctx, q)
 
 	ms := &mockStripe{}
-	emailSvc := emailsvc.New("127.0.0.1", 1025, "", "", "booklab@localhost")
-	srv := New(testConfig(), q, ms, emailSvc, nil)
+	emailSvc := emailsvc.New("127.0.0.1", 1025, "", "", "booklab@localhost", testLogger())
+	srv := New(testConfig(), q, ms, emailSvc, nil, testLogger())
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 

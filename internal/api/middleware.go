@@ -33,24 +33,27 @@ func (s *Server) requireAdmin(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		cookie, err := r.Cookie("booklab_session")
 		if err != nil {
-			writeError(w, http.StatusUnauthorized, "authentication required")
+			s.logger.Warn("admin_auth_missing_session", "path", r.URL.Path)
+			s.writeError(w, r, http.StatusUnauthorized, "authentication required", err)
 			return
 		}
 		sess, err := s.queries.GetAdminSession(r.Context(), cookie.Value)
 		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
-				writeError(w, http.StatusUnauthorized, "invalid or expired session")
+				s.logger.Warn("admin_invalid_session", "path", r.URL.Path)
+				s.writeError(w, r, http.StatusUnauthorized, "invalid or expired session", err)
 				return
 			}
-			writeError(w, http.StatusInternalServerError, "session check failed")
+			s.writeError(w, r, http.StatusInternalServerError, "session check failed", err)
 			return
 		}
 		if _, err := s.queries.GetAdminByUsername(r.Context(), sess.Username); err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
-				writeError(w, http.StatusUnauthorized, "invalid or expired session")
+				s.logger.Warn("admin_invalid_session", "path", r.URL.Path)
+				s.writeError(w, r, http.StatusUnauthorized, "invalid or expired session", err)
 				return
 			}
-			writeError(w, http.StatusInternalServerError, "session check failed")
+			s.writeError(w, r, http.StatusInternalServerError, "session check failed", err)
 			return
 		}
 		next.ServeHTTP(w, r)
@@ -73,7 +76,7 @@ func (s *Server) csrfProtect(next http.Handler) http.Handler {
 		} else {
 			var buf [32]byte
 			if _, err := rand.Read(buf[:]); err != nil {
-				writeError(w, http.StatusInternalServerError, "csrf init failed")
+				s.writeError(w, r, http.StatusInternalServerError, "csrf init failed", err)
 				return
 			}
 			token = hex.EncodeToString(buf[:])
@@ -92,7 +95,8 @@ func (s *Server) csrfProtect(next http.Handler) http.Handler {
 		case http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete:
 			hdr := r.Header.Get("X-CSRF-Token")
 			if subtle.ConstantTimeCompare([]byte(hdr), []byte(token)) != 1 {
-				writeError(w, http.StatusForbidden, "invalid csrf token")
+				s.logger.Warn("admin_csrf_mismatch", "path", r.URL.Path, "method", r.Method)
+				s.writeError(w, r, http.StatusForbidden, "invalid csrf token", nil)
 				return
 			}
 		}

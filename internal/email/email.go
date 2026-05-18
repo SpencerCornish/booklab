@@ -2,9 +2,11 @@ package email
 
 import (
 	"bytes"
+	"crypto/tls"
 	"embed"
 	"fmt"
 	"html/template"
+	"log/slog"
 	"net/mail"
 	"net/smtp"
 	"strings"
@@ -31,15 +33,22 @@ func init() {
 }
 
 type Service struct {
-	host string
-	port int
-	user string
-	pass string
-	from string
+	host   string
+	port   int
+	user   string
+	pass   string
+	from   string
+	logger *slog.Logger
 }
 
-func New(host string, port int, user, pass, from string) *Service {
-	return &Service{host: host, port: port, user: user, pass: pass, from: from}
+func New(host string, port int, user, pass, from string, log *slog.Logger) *Service {
+	if log == nil {
+		log = slog.Default()
+	}
+	return &Service{
+		host: host, port: port, user: user, pass: pass, from: from,
+		logger: log.With("component", "email"),
+	}
 }
 
 type ConfirmationData struct {
@@ -124,6 +133,7 @@ func (s *Service) SendStaffCompletion(to string, data StaffCompletionData) error
 func (s *Service) send(to, subject, tmplName string, data any) error {
 	var buf bytes.Buffer
 	if err := templates.ExecuteTemplate(&buf, tmplName, data); err != nil {
+		s.logger.Error("email template render failed", "template", tmplName, "recipient", to, "error", err)
 		return fmt.Errorf("email template %s: %w", tmplName, err)
 	}
 
@@ -138,7 +148,53 @@ func (s *Service) send(to, subject, tmplName string, data any) error {
 	// smtp.SendMail's from is the envelope MAIL FROM and must be a bare addr@domain.
 	// Passing "Name <addr@host>" makes the client emit invalid nested angle brackets.
 	envelopeFrom := envelopeSender(s.user, s.from)
-	return smtp.SendMail(addr, auth, envelopeFrom, []string{to}, []byte(msg))
+	s.logger.Info("sending email", "template", tmplName, "smtp_host", addr, "recipient", to)
+	if err := s.sendMail(addr, auth, envelopeFrom, []string{to}, []byte(msg)); err != nil {
+		s.logger.Error("email send failed", "template", tmplName, "smtp_host", addr, "recipient", to, "error", err)
+		return err
+	}
+	s.logger.Info("email sent", "template", tmplName, "recipient", to)
+	return nil
+}
+
+// sendMail sends an email, using implicit TLS when the port is 465 or 2465
+// and STARTTLS (via smtp.SendMail) for all other ports (e.g. 587).
+func (s *Service) sendMail(addr string, auth smtp.Auth, from string, to []string, msg []byte) error {
+	if s.port == 465 || s.port == 2465 {
+		tlsCfg := &tls.Config{ServerName: s.host}
+		conn, err := tls.Dial("tcp", addr, tlsCfg)
+		if err != nil {
+			return fmt.Errorf("tls dial: %w", err)
+		}
+		defer conn.Close()
+		c, err := smtp.NewClient(conn, s.host)
+		if err != nil {
+			return fmt.Errorf("smtp new client: %w", err)
+		}
+		defer c.Close()
+		if auth != nil {
+			if err := c.Auth(auth); err != nil {
+				return fmt.Errorf("smtp auth: %w", err)
+			}
+		}
+		if err := c.Mail(from); err != nil {
+			return fmt.Errorf("smtp MAIL FROM: %w", err)
+		}
+		for _, r := range to {
+			if err := c.Rcpt(r); err != nil {
+				return fmt.Errorf("smtp RCPT TO %s: %w", r, err)
+			}
+		}
+		w, err := c.Data()
+		if err != nil {
+			return fmt.Errorf("smtp DATA: %w", err)
+		}
+		if _, err := w.Write(msg); err != nil {
+			return fmt.Errorf("smtp write body: %w", err)
+		}
+		return w.Close()
+	}
+	return smtp.SendMail(addr, auth, from, to, msg)
 }
 
 // envelopeSender returns the RFC 5321 reverse-path for MAIL FROM.

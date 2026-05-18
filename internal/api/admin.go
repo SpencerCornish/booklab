@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"net/http"
 	"strconv"
@@ -39,7 +38,7 @@ func (s *Server) handleAdminLogin(w http.ResponseWriter, r *http.Request) {
 		Username string `json:"username"`
 		Password string `json:"password"`
 	}
-	if !readJSONRequest(w, r, &req) {
+	if !s.readJSONRequest(w, r, &req) {
 		return
 	}
 
@@ -49,16 +48,16 @@ func (s *Server) handleAdminLogin(w http.ResponseWriter, r *http.Request) {
 
 	ipFails, err := s.queries.CountRecentFailedLoginAttemptsByIP(ctx, ip, since)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "login failed")
+		s.writeError(w, r, http.StatusInternalServerError, "login failed", err)
 		return
 	}
 	userFails, err := s.queries.CountRecentFailedLoginAttemptsByUsername(ctx, req.Username, since)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "login failed")
+		s.writeError(w, r, http.StatusInternalServerError, "login failed", err)
 		return
 	}
 	if ipFails >= loginRateLimitMax || userFails >= loginRateLimitMax {
-		writeError(w, http.StatusTooManyRequests, "too many failed login attempts, try again later")
+		s.writeError(w, r, http.StatusTooManyRequests, "too many failed login attempts, try again later", nil)
 		return
 	}
 
@@ -66,27 +65,27 @@ func (s *Server) handleAdminLogin(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			_ = s.queries.RecordLoginAttempt(ctx, req.Username, ip, false)
-			writeError(w, http.StatusUnauthorized, "invalid credentials")
+			s.writeError(w, r, http.StatusUnauthorized, "invalid credentials", nil)
 			return
 		}
-		writeError(w, http.StatusInternalServerError, "login failed")
+		s.writeError(w, r, http.StatusInternalServerError, "login failed", err)
 		return
 	}
 
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.Password)); err != nil {
 		_ = s.queries.RecordLoginAttempt(ctx, req.Username, ip, false)
-		writeError(w, http.StatusUnauthorized, "invalid credentials")
+		s.writeError(w, r, http.StatusUnauthorized, "invalid credentials", nil)
 		return
 	}
 
 	if err := s.queries.RecordLoginAttempt(ctx, req.Username, ip, true); err != nil {
-		writeError(w, http.StatusInternalServerError, "login failed")
+		s.writeError(w, r, http.StatusInternalServerError, "login failed", err)
 		return
 	}
 
 	token, err := s.newAdminSession(ctx, user.Username)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "login failed")
+		s.writeError(w, r, http.StatusInternalServerError, "login failed", err)
 		return
 	}
 	http.SetCookie(w, &http.Cookie{
@@ -123,7 +122,7 @@ func (s *Server) handleAdminListBookings(w http.ResponseWriter, r *http.Request)
 	if d := r.URL.Query().Get("date"); d != "" {
 		t, err := time.Parse("2006-01-02", d)
 		if err != nil {
-			writeError(w, http.StatusBadRequest, "invalid date format")
+			s.writeError(w, r, http.StatusBadRequest, "invalid date format", err)
 			return
 		}
 		params.Date = &t
@@ -135,7 +134,7 @@ func (s *Server) handleAdminListBookings(w http.ResponseWriter, r *http.Request)
 
 	bookings, err := s.queries.ListBookings(r.Context(), params)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to list bookings")
+		s.writeError(w, r, http.StatusInternalServerError, "failed to list bookings", err)
 		return
 	}
 
@@ -149,7 +148,7 @@ func (s *Server) handleAdminListBookings(w http.ResponseWriter, r *http.Request)
 func (s *Server) handleAdminUpdateBooking(w http.ResponseWriter, r *http.Request) {
 	id, err := parseID(r)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid booking id")
+		s.writeError(w, r, http.StatusBadRequest, "invalid booking id", err)
 		return
 	}
 
@@ -157,7 +156,7 @@ func (s *Server) handleAdminUpdateBooking(w http.ResponseWriter, r *http.Request
 		EndTime *time.Time        `json:"end_time"`
 		Status  *db.BookingStatus `json:"status"`
 	}
-	if !readJSONRequest(w, r, &req) {
+	if !s.readJSONRequest(w, r, &req) {
 		return
 	}
 
@@ -167,16 +166,16 @@ func (s *Server) handleAdminUpdateBooking(w http.ResponseWriter, r *http.Request
 	} else if req.Status != nil {
 		booking, err = s.queries.UpdateBookingStatus(r.Context(), id, *req.Status)
 	} else {
-		writeError(w, http.StatusBadRequest, "no fields to update")
+		s.writeError(w, r, http.StatusBadRequest, "no fields to update", nil)
 		return
 	}
 
 	if err != nil {
 		if err == pgx.ErrNoRows {
-			writeError(w, http.StatusNotFound, "booking not found")
+			s.writeError(w, r, http.StatusNotFound, "booking not found", err)
 			return
 		}
-		writeError(w, http.StatusInternalServerError, "failed to update booking")
+		s.writeError(w, r, http.StatusInternalServerError, "failed to update booking", err)
 		return
 	}
 
@@ -204,7 +203,7 @@ func (s *Server) handleAdminUpdateBooking(w http.ResponseWriter, r *http.Request
 			}
 			for _, addr := range splitEmails(settings.NotificationEmails) {
 				if err := s.email.SendStaffCompletion(addr, staffData); err != nil {
-					log.Printf("staff completion email to %s: %v", addr, err)
+					s.logger.Error("staff completion email failed", "booking_id", booking.ID, "recipient", addr, "error", err)
 				}
 			}
 		}()
@@ -219,7 +218,7 @@ const maxChargeAmountCents int32 = 20_000
 func (s *Server) handleAdminChargeBooking(w http.ResponseWriter, r *http.Request) {
 	id, err := parseID(r)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid booking id")
+		s.writeError(w, r, http.StatusBadRequest, "invalid booking id", err)
 		return
 	}
 
@@ -229,7 +228,7 @@ func (s *Server) handleAdminChargeBooking(w http.ResponseWriter, r *http.Request
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&req); err != nil && !errors.Is(err, io.EOF) {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+		s.writeError(w, r, http.StatusBadRequest, "invalid request body", err)
 		return
 	}
 
@@ -237,20 +236,20 @@ func (s *Server) handleAdminChargeBooking(w http.ResponseWriter, r *http.Request
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			if _, gerr := s.queries.GetBookingByID(r.Context(), id); gerr == pgx.ErrNoRows {
-				writeError(w, http.StatusNotFound, "booking not found")
+				s.writeError(w, r, http.StatusNotFound, "booking not found", gerr)
 				return
 			}
-			writeError(w, http.StatusConflict, "booking cannot be charged (already charged, in progress, or not eligible)")
+			s.writeError(w, r, http.StatusConflict, "booking cannot be charged (already charged, in progress, or not eligible)", nil)
 			return
 		}
-		writeError(w, http.StatusInternalServerError, "failed to claim booking for charge")
+		s.writeError(w, r, http.StatusInternalServerError, "failed to claim booking for charge", err)
 		return
 	}
 
 	settings, err := s.queries.GetSettings(r.Context())
 	if err != nil {
 		_ = s.queries.RevertBookingFromChargingToCompleted(r.Context(), id)
-		writeError(w, http.StatusInternalServerError, "failed to load settings")
+		s.writeError(w, r, http.StatusInternalServerError, "failed to load settings", err)
 		return
 	}
 
@@ -258,7 +257,7 @@ func (s *Server) handleAdminChargeBooking(w http.ResponseWriter, r *http.Request
 	if req.AmountCents != nil {
 		if *req.AmountCents <= 0 || *req.AmountCents > maxChargeAmountCents {
 			_ = s.queries.RevertBookingFromChargingToCompleted(r.Context(), id)
-			writeError(w, http.StatusBadRequest, "invalid amount_cents")
+			s.writeError(w, r, http.StatusBadRequest, "invalid amount_cents", nil)
 			return
 		}
 		amountCents = *req.AmountCents
@@ -270,7 +269,7 @@ func (s *Server) handleAdminChargeBooking(w http.ResponseWriter, r *http.Request
 		amountCents = hours * settings.HourlyRateCents
 		if amountCents <= 0 || amountCents > maxChargeAmountCents {
 			_ = s.queries.RevertBookingFromChargingToCompleted(r.Context(), id)
-			writeError(w, http.StatusBadRequest, "computed charge amount is out of allowed range")
+			s.writeError(w, r, http.StatusBadRequest, "computed charge amount is out of allowed range", nil)
 			return
 		}
 	}
@@ -280,17 +279,18 @@ func (s *Server) handleAdminChargeBooking(w http.ResponseWriter, r *http.Request
 	piID, receiptURL, err := s.stripe.ChargePaymentMethod(*booking.StripePaymentMethodID, int64(amountCents), settings.Currency, description, idempotencyKey)
 	if err != nil {
 		_ = s.queries.RevertBookingFromChargingToCompleted(r.Context(), id)
-		log.Printf("charge booking %d: %v", id, err)
-		writeError(w, http.StatusInternalServerError, "payment failed")
+		s.logger.Error("admin charge stripe failed", "booking_id", id, "email", booking.Email, "error", err)
+		s.writeError(w, r, http.StatusInternalServerError, "payment failed", err)
 		return
 	}
 
 	updated, err := s.queries.UpdateBookingCharged(r.Context(), id, piID, receiptURL, amountCents)
 	if err != nil {
 		if err == pgx.ErrNoRows {
-			log.Printf("charge booking %d: Stripe succeeded but DB finalize failed (no charging row): pi=%s", id, piID)
+			s.logger.Error("admin charge db finalize missing row after stripe success",
+				"booking_id", id, "payment_intent_id", piID)
 		}
-		writeError(w, http.StatusInternalServerError, "failed to record charge")
+		s.writeError(w, r, http.StatusInternalServerError, "failed to record charge", err)
 		return
 	}
 
@@ -304,7 +304,9 @@ func (s *Server) handleAdminChargeBooking(w http.ResponseWriter, r *http.Request
 			AmountCents:      amountCents,
 			StripeReceiptURL: receiptURL,
 		}
-		_ = s.email.SendReceipt(booking.Email, data)
+		if err := s.email.SendReceipt(booking.Email, data); err != nil {
+			s.logger.Error("admin send receipt failed", "booking_id", id, "email", booking.Email, "error", err)
+		}
 	}()
 
 	writeJSON(w, http.StatusOK, bookingToAdmin(updated))
@@ -313,7 +315,7 @@ func (s *Server) handleAdminChargeBooking(w http.ResponseWriter, r *http.Request
 func (s *Server) handleAdminGetSettings(w http.ResponseWriter, r *http.Request) {
 	settings, err := s.queries.GetSettings(r.Context())
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to load settings")
+		s.writeError(w, r, http.StatusInternalServerError, "failed to load settings", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, settingsToMap(settings))
@@ -332,7 +334,7 @@ func (s *Server) handleAdminUpdateSettings(w http.ResponseWriter, r *http.Reques
 		ReminderHoursBefore *int32  `json:"reminder_hours_before"`
 		NotificationEmails  *string `json:"notification_emails"`
 	}
-	if !readJSONRequest(w, r, &req) {
+	if !s.readJSONRequest(w, r, &req) {
 		return
 	}
 
@@ -350,7 +352,7 @@ func (s *Server) handleAdminUpdateSettings(w http.ResponseWriter, r *http.Reques
 	if req.BookableStart != nil {
 		t, err := time.Parse("15:04", *req.BookableStart)
 		if err != nil {
-			writeError(w, http.StatusBadRequest, "invalid bookable_start format (HH:MM)")
+			s.writeError(w, r, http.StatusBadRequest, "invalid bookable_start format (HH:MM)", err)
 			return
 		}
 		params.BookableStart = &t
@@ -358,7 +360,7 @@ func (s *Server) handleAdminUpdateSettings(w http.ResponseWriter, r *http.Reques
 	if req.BookableEnd != nil {
 		t, err := time.Parse("15:04", *req.BookableEnd)
 		if err != nil {
-			writeError(w, http.StatusBadRequest, "invalid bookable_end format (HH:MM)")
+			s.writeError(w, r, http.StatusBadRequest, "invalid bookable_end format (HH:MM)", err)
 			return
 		}
 		params.BookableEnd = &t
@@ -366,7 +368,7 @@ func (s *Server) handleAdminUpdateSettings(w http.ResponseWriter, r *http.Reques
 
 	settings, err := s.queries.UpdateSettings(r.Context(), params)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to update settings")
+		s.writeError(w, r, http.StatusInternalServerError, "failed to update settings", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, settingsToMap(settings))
@@ -375,7 +377,7 @@ func (s *Server) handleAdminUpdateSettings(w http.ResponseWriter, r *http.Reques
 func (s *Server) handleAdminListClosures(w http.ResponseWriter, r *http.Request) {
 	closures, err := s.queries.ListClosures(r.Context())
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to list closures")
+		s.writeError(w, r, http.StatusInternalServerError, "failed to list closures", err)
 		return
 	}
 	result := make([]map[string]any, len(closures))
@@ -391,24 +393,24 @@ func (s *Server) handleAdminCreateClosure(w http.ResponseWriter, r *http.Request
 		EndDate   string  `json:"end_date"`
 		Reason    *string `json:"reason"`
 	}
-	if !readJSONRequest(w, r, &req) {
+	if !s.readJSONRequest(w, r, &req) {
 		return
 	}
 
 	start, err := time.Parse("2006-01-02", req.StartDate)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid start_date (YYYY-MM-DD)")
+		s.writeError(w, r, http.StatusBadRequest, "invalid start_date (YYYY-MM-DD)", err)
 		return
 	}
 	end, err := time.Parse("2006-01-02", req.EndDate)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid end_date (YYYY-MM-DD)")
+		s.writeError(w, r, http.StatusBadRequest, "invalid end_date (YYYY-MM-DD)", err)
 		return
 	}
 
 	closure, err := s.queries.CreateClosure(r.Context(), start, end, req.Reason)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to create closure")
+		s.writeError(w, r, http.StatusInternalServerError, "failed to create closure", err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, closureToMap(closure))
@@ -417,7 +419,7 @@ func (s *Server) handleAdminCreateClosure(w http.ResponseWriter, r *http.Request
 func (s *Server) handleAdminUpdateClosure(w http.ResponseWriter, r *http.Request) {
 	id, err := parseID(r)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid closure id")
+		s.writeError(w, r, http.StatusBadRequest, "invalid closure id", err)
 		return
 	}
 
@@ -426,28 +428,28 @@ func (s *Server) handleAdminUpdateClosure(w http.ResponseWriter, r *http.Request
 		EndDate   string  `json:"end_date"`
 		Reason    *string `json:"reason"`
 	}
-	if !readJSONRequest(w, r, &req) {
+	if !s.readJSONRequest(w, r, &req) {
 		return
 	}
 
 	start, err := time.Parse("2006-01-02", req.StartDate)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid start_date")
+		s.writeError(w, r, http.StatusBadRequest, "invalid start_date", err)
 		return
 	}
 	end, err := time.Parse("2006-01-02", req.EndDate)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid end_date")
+		s.writeError(w, r, http.StatusBadRequest, "invalid end_date", err)
 		return
 	}
 
 	closure, err := s.queries.UpdateClosure(r.Context(), id, start, end, req.Reason)
 	if err != nil {
 		if err == pgx.ErrNoRows {
-			writeError(w, http.StatusNotFound, "closure not found")
+			s.writeError(w, r, http.StatusNotFound, "closure not found", err)
 			return
 		}
-		writeError(w, http.StatusInternalServerError, "failed to update closure")
+		s.writeError(w, r, http.StatusInternalServerError, "failed to update closure", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, closureToMap(closure))
@@ -456,11 +458,11 @@ func (s *Server) handleAdminUpdateClosure(w http.ResponseWriter, r *http.Request
 func (s *Server) handleAdminDeleteClosure(w http.ResponseWriter, r *http.Request) {
 	id, err := parseID(r)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid closure id")
+		s.writeError(w, r, http.StatusBadRequest, "invalid closure id", err)
 		return
 	}
 	if err := s.queries.DeleteClosure(r.Context(), id); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to delete closure")
+		s.writeError(w, r, http.StatusInternalServerError, "failed to delete closure", err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

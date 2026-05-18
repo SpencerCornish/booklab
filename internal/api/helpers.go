@@ -13,7 +13,24 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	json.NewEncoder(w).Encode(v)
 }
 
-func writeError(w http.ResponseWriter, status int, msg string) {
+func (s *Server) writeError(w http.ResponseWriter, r *http.Request, status int, msg string, err error) {
+	attrs := []any{
+		"method", r.Method,
+		"path", r.URL.Path,
+		"status", status,
+		"msg", msg,
+	}
+	if err != nil {
+		attrs = append(attrs, "err", err)
+	}
+	switch {
+	case status >= 500:
+		s.logger.Error("api_error", attrs...)
+	case status >= 400:
+		s.logger.Warn("api_error", attrs...)
+	default:
+		s.logger.Info("api_error", attrs...)
+	}
 	writeJSON(w, status, map[string]string{"error": msg})
 }
 
@@ -37,14 +54,14 @@ func readJSON(r *http.Request, v any) error {
 
 // readJSONRequest decodes the body into v and writes an error response on failure.
 // Returns true only when decoding succeeded.
-func readJSONRequest(w http.ResponseWriter, r *http.Request, v any) bool {
+func (s *Server) readJSONRequest(w http.ResponseWriter, r *http.Request, v any) bool {
 	if err := readJSON(r, v); err != nil {
 		var mbe *http.MaxBytesError
 		if errors.As(err, &mbe) {
-			writeError(w, http.StatusRequestEntityTooLarge, "request body too large")
+			s.writeError(w, r, http.StatusRequestEntityTooLarge, "request body too large", err)
 			return false
 		}
-		writeError(w, http.StatusBadRequest, "invalid request body")
+		s.writeError(w, r, http.StatusBadRequest, "invalid request body", err)
 		return false
 	}
 	return true

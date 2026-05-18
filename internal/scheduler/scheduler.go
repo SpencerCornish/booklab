@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -19,10 +19,17 @@ type Scheduler struct {
 	email   *email.Service
 	stripe  stripe.Client
 	appURL  string
+	logger  *slog.Logger
 }
 
-func New(queries *db.Queries, emailSvc *email.Service, stripeSvc stripe.Client, appURL string) *Scheduler {
-	return &Scheduler{queries: queries, email: emailSvc, stripe: stripeSvc, appURL: appURL}
+func New(queries *db.Queries, emailSvc *email.Service, stripeSvc stripe.Client, appURL string, log *slog.Logger) *Scheduler {
+	if log == nil {
+		log = slog.Default()
+	}
+	return &Scheduler{
+		queries: queries, email: emailSvc, stripe: stripeSvc, appURL: appURL,
+		logger: log.With("component", "scheduler"),
+	}
 }
 
 // Start runs a background ticker that checks for reminder emails and auto-charges.
@@ -45,23 +52,26 @@ func (s *Scheduler) Start(ctx context.Context) {
 }
 
 func (s *Scheduler) runOnce(ctx context.Context) {
+	s.logger.Info("scheduler_tick_started")
 	settings, err := s.queries.GetSettings(ctx)
 	if err != nil {
-		log.Printf("scheduler: get settings: %v", err)
+		s.logger.Error("scheduler get settings failed", "error", err)
 		return
 	}
 
-	s.sendReminders(ctx, settings)
-	s.autoChargeCompleted(ctx, settings)
+	remindersSent := s.sendReminders(ctx, settings)
+	chargesOK := s.autoChargeCompleted(ctx, settings)
+	s.logger.Info("scheduler_tick_completed", "reminders_sent", remindersSent, "charges_succeeded", chargesOK)
 }
 
-func (s *Scheduler) sendReminders(ctx context.Context, settings *db.Settings) {
+func (s *Scheduler) sendReminders(ctx context.Context, settings *db.Settings) int {
 	bookings, err := s.queries.ListBookingsDueReminder(ctx, int(settings.ReminderHoursBefore))
 	if err != nil {
-		log.Printf("scheduler: list bookings due reminder: %v", err)
-		return
+		s.logger.Error("scheduler list bookings due reminder failed", "error", err)
+		return 0
 	}
 
+	sent := 0
 	for _, b := range bookings {
 		data := email.ReminderData{
 			ResourceName: settings.ResourceName,
@@ -71,27 +81,31 @@ func (s *Scheduler) sendReminders(ctx context.Context, settings *db.Settings) {
 			CancelURL:    fmt.Sprintf("%s/cancel/%s", s.appURL, b.CancelToken),
 		}
 		if err := s.email.SendReminder(b.Email, data); err != nil {
-			log.Printf("scheduler: send reminder to %s: %v", b.Email, err)
+			s.logger.Error("scheduler send reminder failed", "booking_id", b.ID, "email", b.Email, "error", err)
 			continue
 		}
 		if err := s.queries.MarkReminderSent(ctx, b.ID); err != nil {
-			log.Printf("scheduler: mark reminder sent for booking %d: %v", b.ID, err)
+			s.logger.Error("scheduler mark reminder sent failed", "booking_id", b.ID, "email", b.Email, "error", err)
+			continue
 		}
+		sent++
 	}
+	return sent
 }
 
 // $200 is a safe max for now
 const maxChargeAmountCents int32 = 20_000
 
-func (s *Scheduler) autoChargeCompleted(ctx context.Context, settings *db.Settings) {
+func (s *Scheduler) autoChargeCompleted(ctx context.Context, settings *db.Settings) int {
+	charged := 0
 	for {
 		b, err := s.queries.ClaimBookingForAutoCharge(ctx)
 		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
-				return
+				return charged
 			}
-			log.Printf("scheduler: claim booking for auto-charge: %v", err)
-			return
+			s.logger.Error("scheduler claim booking for auto-charge failed", "error", err)
+			return charged
 		}
 
 		hours := int32(b.EndTime.Sub(b.StartTime).Hours())
@@ -101,7 +115,8 @@ func (s *Scheduler) autoChargeCompleted(ctx context.Context, settings *db.Settin
 		amountCents := hours * settings.HourlyRateCents
 		if amountCents <= 0 || amountCents > maxChargeAmountCents {
 			_ = s.queries.RevertBookingFromChargingToCompleted(ctx, b.ID)
-			log.Printf("scheduler: auto-charge booking %d: amount %d out of range", b.ID, amountCents)
+			s.logger.Warn("scheduler auto-charge amount out of range",
+				"booking_id", b.ID, "email", b.Email, "amount_cents", amountCents)
 			continue
 		}
 
@@ -111,16 +126,17 @@ func (s *Scheduler) autoChargeCompleted(ctx context.Context, settings *db.Settin
 		piID, receiptURL, err := s.stripe.ChargePaymentMethod(*b.StripePaymentMethodID, int64(amountCents), settings.Currency, description, idempotencyKey)
 		if err != nil {
 			_ = s.queries.RevertBookingFromChargingToCompleted(ctx, b.ID)
-			log.Printf("scheduler: auto-charge booking %d: %v", b.ID, err)
+			s.logger.Error("scheduler auto-charge stripe failed", "booking_id", b.ID, "email", b.Email, "error", err)
 			continue
 		}
 
 		updated, err := s.queries.UpdateBookingCharged(ctx, b.ID, piID, receiptURL, amountCents)
 		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
-				log.Printf("scheduler: auto-charge booking %d: Stripe succeeded but DB finalize failed: pi=%s", b.ID, piID)
+				s.logger.Error("scheduler auto-charge db finalize failed after stripe success",
+					"booking_id", b.ID, "email", b.Email, "payment_intent_id", piID)
 			} else {
-				log.Printf("scheduler: record auto-charge for booking %d: %v", b.ID, err)
+				s.logger.Error("scheduler record auto-charge failed", "booking_id", b.ID, "email", b.Email, "error", err)
 			}
 			continue
 		}
@@ -135,10 +151,12 @@ func (s *Scheduler) autoChargeCompleted(ctx context.Context, settings *db.Settin
 				StripeReceiptURL: receipt,
 			}
 			if err := s.email.SendReceipt(booking.Email, data); err != nil {
-				log.Printf("scheduler: send receipt to %s: %v", booking.Email, err)
+				s.logger.Error("scheduler send receipt failed", "booking_id", booking.ID, "email", booking.Email, "error", err)
 			}
 		}(updated, amountCents, receiptURL)
 
-		log.Printf("scheduler: auto-charged booking %d (%s) for %s", b.ID, b.Email, description)
+		s.logger.Info("scheduler auto-charged booking",
+			"booking_id", b.ID, "email", b.Email, "amount_cents", amountCents, "payment_intent_id", piID)
+		charged++
 	}
 }
