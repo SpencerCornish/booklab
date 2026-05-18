@@ -184,6 +184,7 @@ func (s *Server) handleCreateBooking(w http.ResponseWriter, r *http.Request) {
 			EndTime:      booking.EndTime,
 			CancelURL:    s.cfg.AppURL + "/cancel/" + booking.CancelToken.String(),
 			ViewURL:      s.cfg.AppURL + "/booking/" + booking.CancelToken.String(),
+			Timezone:     settings.Timezone,
 		}
 		if err := s.email.SendConfirmation(booking.Email, data); err != nil {
 			s.logger.Error("send confirmation email failed", "booking_id", booking.ID, "email", booking.Email, "error", err)
@@ -200,6 +201,7 @@ func (s *Server) handleCreateBooking(w http.ResponseWriter, r *http.Request) {
 				IsReturnCustomer:  priorCount > 0,
 				PriorBookingCount: priorCount,
 				AdminURL:          s.cfg.AppURL + "/admin/bookings",
+				Timezone:          settings.Timezone,
 			}
 			for _, addr := range splitEmails(settings.NotificationEmails) {
 				if err := s.email.SendStaffNewBooking(addr, staffData); err != nil {
@@ -300,11 +302,32 @@ func (s *Server) handleCancelBooking(w http.ResponseWriter, r *http.Request) {
 				BookerName:   booking.Name,
 				StartTime:    booking.StartTime,
 				EndTime:      booking.EndTime,
+				Timezone:     settings.Timezone,
 			}
 			if err := s.email.SendCancellation(booking.Email, data); err != nil {
 				s.logger.Error("send cancellation email failed", "booking_id", booking.ID, "email", booking.Email, "error", err)
 			}
 		}()
+
+		if settings.NotificationEmails != "" {
+			staffData := emailsvc.StaffCancellationData{
+				ResourceName: settings.ResourceName,
+				BookerName:   booking.Name,
+				BookerEmail:  booking.Email,
+				StartTime:    booking.StartTime,
+				EndTime:      booking.EndTime,
+				AdminURL:     s.cfg.AppURL + "/admin/bookings",
+				Timezone:     settings.Timezone,
+			}
+			for _, addr := range splitEmails(settings.NotificationEmails) {
+				addr := addr
+				go func() {
+					if err := s.email.SendStaffCancellation(addr, staffData); err != nil {
+						s.logger.Error("staff cancellation email failed", "booking_id", booking.ID, "recipient", addr, "error", err)
+					}
+				}()
+			}
+		}
 	}
 
 	// Detach payment method if present

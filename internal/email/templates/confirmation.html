@@ -7,8 +7,8 @@
 
   <div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:20px;margin:24px 0;">
     <p style="margin:0 0 8px;"><strong>Name:</strong> {{.BookerName}}</p>
-    <p style="margin:0 0 8px;"><strong>Start:</strong> {{formatTime .StartTime}}</p>
-    <p style="margin:0;"><strong>End:</strong> {{formatTime .EndTime}}</p>
+    <p style="margin:0 0 8px;"><strong>Start:</strong> {{formatTime .StartTime .Timezone}}</p>
+    <p style="margin:0;"><strong>End:</strong> {{formatTime .EndTime .Timezone}}</p>
   </div>
 
   <p style="color:#555;font-size:14px;">

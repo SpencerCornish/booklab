@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8"><title>Booking Cancelled</title></head>
+<body style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:24px;color:#1a1a1a;">
+  <h1 style="color:#dc2626;margin-bottom:4px;">Booking Cancelled – {{.ResourceName}}</h1>
+
+  <div style="background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:20px;margin:16px 0;">
+    <p style="margin:0 0 8px;"><strong>Name:</strong> {{.BookerName}}</p>
+    <p style="margin:0 0 8px;"><strong>Email:</strong> {{.BookerEmail}}</p>
+    <p style="margin:0 0 8px;"><strong>Start:</strong> {{formatTime .StartTime .Timezone}}</p>
+    <p style="margin:0;"><strong>End:</strong> {{formatTime .EndTime .Timezone}}</p>
+  </div>
+
+  <p style="margin:20px 0;">
+    <a href="{{.AdminURL}}" style="display:inline-block;background:#dc2626;color:white;padding:10px 20px;border-radius:6px;text-decoration:none;">View in Admin</a>
+  </p>
+
+  <p style="color:#9ca3af;font-size:12px;border-top:1px solid #e5e7eb;padding-top:16px;">
+    You are receiving this because you are listed as a staff notification contact.
+  </p>
+</body>
+</html>

@@ -200,6 +200,7 @@ func (s *Server) handleAdminUpdateBooking(w http.ResponseWriter, r *http.Request
 				AutoAmountCents: autoAmount,
 				AutoChargeAt:    time.Now().Add(24 * time.Hour),
 				AdminURL:        s.cfg.AppURL + "/admin/bookings",
+				Timezone:        settings.Timezone,
 			}
 			for _, addr := range splitEmails(settings.NotificationEmails) {
 				if err := s.email.SendStaffCompletion(addr, staffData); err != nil {
@@ -303,6 +304,7 @@ func (s *Server) handleAdminChargeBooking(w http.ResponseWriter, r *http.Request
 			EndTime:          booking.EndTime,
 			AmountCents:      amountCents,
 			StripeReceiptURL: receiptURL,
+			Timezone:         settings.Timezone,
 		}
 		if err := s.email.SendReceipt(booking.Email, data); err != nil {
 			s.logger.Error("admin send receipt failed", "booking_id", id, "email", booking.Email, "error", err)

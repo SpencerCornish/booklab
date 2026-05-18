@@ -20,10 +20,16 @@ var templates *template.Template
 
 func init() {
 	templates = template.Must(template.New("").Funcs(template.FuncMap{
-		"formatTime": func(t time.Time) string {
+		"formatTime": func(t time.Time, tz string) string {
+			if loc, err := time.LoadLocation(tz); err == nil {
+				t = t.In(loc)
+			}
 			return t.Format("Mon Jan 2, 2006 at 3:04 PM MST")
 		},
-		"formatDate": func(t time.Time) string {
+		"formatDate": func(t time.Time, tz string) string {
+			if loc, err := time.LoadLocation(tz); err == nil {
+				t = t.In(loc)
+			}
 			return t.Format("Monday, January 2, 2006")
 		},
 		"formatMoney": func(cents int32) string {
@@ -58,6 +64,7 @@ type ConfirmationData struct {
 	EndTime      time.Time
 	CancelURL    string
 	ViewURL      string
+	Timezone     string
 }
 
 type ReminderData struct {
@@ -66,6 +73,7 @@ type ReminderData struct {
 	StartTime    time.Time
 	EndTime      time.Time
 	CancelURL    string
+	Timezone     string
 }
 
 type CancellationData struct {
@@ -73,6 +81,7 @@ type CancellationData struct {
 	BookerName   string
 	StartTime    time.Time
 	EndTime      time.Time
+	Timezone     string
 }
 
 type ReceiptData struct {
@@ -82,6 +91,7 @@ type ReceiptData struct {
 	EndTime          time.Time
 	AmountCents      int32
 	StripeReceiptURL string
+	Timezone         string
 }
 
 type StaffNewBookingData struct {
@@ -93,6 +103,17 @@ type StaffNewBookingData struct {
 	IsReturnCustomer  bool
 	PriorBookingCount int64
 	AdminURL          string
+	Timezone          string
+}
+
+type StaffCancellationData struct {
+	ResourceName string
+	BookerName   string
+	BookerEmail  string
+	StartTime    time.Time
+	EndTime      time.Time
+	AdminURL     string
+	Timezone     string
 }
 
 type StaffCompletionData struct {
@@ -104,6 +125,7 @@ type StaffCompletionData struct {
 	AutoAmountCents int32
 	AutoChargeAt    time.Time
 	AdminURL        string
+	Timezone        string
 }
 
 func (s *Service) SendConfirmation(to string, data ConfirmationData) error {
@@ -124,6 +146,10 @@ func (s *Service) SendReceipt(to string, data ReceiptData) error {
 
 func (s *Service) SendStaffNewBooking(to string, data StaffNewBookingData) error {
 	return s.send(to, fmt.Sprintf("New Booking – %s", data.ResourceName), "staff_new_booking.html", data)
+}
+
+func (s *Service) SendStaffCancellation(to string, data StaffCancellationData) error {
+	return s.send(to, fmt.Sprintf("Booking Cancelled – %s", data.ResourceName), "staff_cancellation.html", data)
 }
 
 func (s *Service) SendStaffCompletion(to string, data StaffCompletionData) error {

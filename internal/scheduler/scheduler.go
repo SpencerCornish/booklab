@@ -79,6 +79,7 @@ func (s *Scheduler) sendReminders(ctx context.Context, settings *db.Settings) in
 			StartTime:    b.StartTime,
 			EndTime:      b.EndTime,
 			CancelURL:    fmt.Sprintf("%s/cancel/%s", s.appURL, b.CancelToken),
+			Timezone:     settings.Timezone,
 		}
 		if err := s.email.SendReminder(b.Email, data); err != nil {
 			s.logger.Error("scheduler send reminder failed", "booking_id", b.ID, "email", b.Email, "error", err)
@@ -149,6 +150,7 @@ func (s *Scheduler) autoChargeCompleted(ctx context.Context, settings *db.Settin
 				EndTime:          booking.EndTime,
 				AmountCents:      amount,
 				StripeReceiptURL: receipt,
+				Timezone:         settings.Timezone,
 			}
 			if err := s.email.SendReceipt(booking.Email, data); err != nil {
 				s.logger.Error("scheduler send receipt failed", "booking_id", booking.ID, "email", booking.Email, "error", err)

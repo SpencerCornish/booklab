@@ -8,11 +8,11 @@
   <div style="background:#f5f3ff;border:1px solid #ddd6fe;border-radius:8px;padding:20px;margin:16px 0;">
     <p style="margin:0 0 8px;"><strong>Name:</strong> {{.BookerName}}</p>
     <p style="margin:0 0 8px;"><strong>Email:</strong> {{.BookerEmail}}</p>
-    <p style="margin:0 0 8px;"><strong>Start:</strong> {{formatTime .StartTime}}</p>
-    <p style="margin:0 0 8px;"><strong>End:</strong> {{formatTime .EndTime}}</p>
+    <p style="margin:0 0 8px;"><strong>Start:</strong> {{formatTime .StartTime .Timezone}}</p>
+    <p style="margin:0 0 8px;"><strong>End:</strong> {{formatTime .EndTime .Timezone}}</p>
     <p style="margin:0;border-top:1px solid #ddd6fe;padding-top:12px;margin-top:12px;">
       <strong>Auto-charge amount:</strong> {{formatMoney .AutoAmountCents}}<br>
-      <strong>Auto-charges at:</strong> {{formatTime .AutoChargeAt}}
+      <strong>Auto-charges at:</strong> {{formatTime .AutoChargeAt .Timezone}}
     </p>
   </div>
 
@@ -21,7 +21,7 @@
   </p>
 
   <p style="color:#9ca3af;font-size:12px;border-top:1px solid #e5e7eb;padding-top:16px;">
-    If no action is taken, the customer will be automatically charged {{formatMoney .AutoAmountCents}} at {{formatTime .AutoChargeAt}}.
+    If no action is taken, the customer will be automatically charged {{formatMoney .AutoAmountCents}} at {{formatTime .AutoChargeAt .Timezone}}.
   </p>
 </body>
 </html>
