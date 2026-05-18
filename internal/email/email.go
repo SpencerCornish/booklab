@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"html/template"
 	"log/slog"
-	"net/mail"
 	"net/smtp"
 	"strings"
 	"time"
@@ -145,11 +144,8 @@ func (s *Service) send(to, subject, tmplName string, data any) error {
 	if s.user != "" {
 		auth = smtp.PlainAuth("", s.user, s.pass, s.host)
 	}
-	// smtp.SendMail's from is the envelope MAIL FROM and must be a bare addr@domain.
-	// Passing "Name <addr@host>" makes the client emit invalid nested angle brackets.
-	envelopeFrom := envelopeSender(s.user, s.from)
 	s.logger.Info("sending email", "template", tmplName, "smtp_host", addr, "recipient", to)
-	if err := s.sendMail(addr, auth, envelopeFrom, []string{to}, []byte(msg)); err != nil {
+	if err := s.sendMail(addr, auth, s.from, []string{to}, []byte(msg)); err != nil {
 		s.logger.Error("email send failed", "template", tmplName, "smtp_host", addr, "recipient", to, "error", err)
 		return err
 	}
@@ -197,24 +193,6 @@ func (s *Service) sendMail(addr string, auth smtp.Auth, from string, to []string
 	return smtp.SendMail(addr, auth, from, to, msg)
 }
 
-// envelopeSender returns the RFC 5321 reverse-path for MAIL FROM.
-// When SMTP credentials are set, the auth identity is used; otherwise the address
-// part of SMTP_FROM is extracted (display name is only in message headers).
-func envelopeSender(smtpUser, fromHeader string) string {
-	if smtpUser != "" {
-		return smtpUser
-	}
-	addr, err := mail.ParseAddress(fromHeader)
-	if err == nil {
-		return addr.Address
-	}
-	// Last resort: "Local Part <addr@host>" without strict parsing
-	fromHeader = strings.TrimSpace(fromHeader)
-	if i := strings.LastIndex(fromHeader, "<"); i >= 0 && strings.HasSuffix(fromHeader, ">") {
-		return strings.TrimSpace(fromHeader[i+1 : len(fromHeader)-1])
-	}
-	return fromHeader
-}
 
 func sanitizeHeader(s string) string {
 	return strings.NewReplacer("\r", "", "\n", "").Replace(s)

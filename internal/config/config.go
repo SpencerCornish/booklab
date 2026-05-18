@@ -12,8 +12,7 @@ type Config struct {
 	DatabaseURL string `envconfig:"DATABASE_URL" required:"true"`
 	Port        int    `envconfig:"PORT" default:"8080"`
 
-	StripeSecretKey     string `envconfig:"STRIPE_SECRET_KEY" required:"true"`
-	StripeWebhookSecret string `envconfig:"STRIPE_WEBHOOK_SECRET"`
+	StripeSecretKey string `envconfig:"STRIPE_SECRET_KEY" required:"true"`
 
 	SMTPHost string `envconfig:"SMTP_HOST" required:"true"`
 	SMTPPort int    `envconfig:"SMTP_PORT" default:"587"`
