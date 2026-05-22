@@ -130,6 +130,20 @@ type StaffCompletionData struct {
 	Timezone        string
 }
 
+type StaffChargeFailureData struct {
+	ResourceName   string
+	BookerName     string
+	BookerEmail    string
+	StartTime      time.Time
+	EndTime        time.Time
+	AmountCents    int32
+	ChargeAttempts int32
+	ErrorMessage   string
+	Source         string // "auto" or "manual"
+	AdminURL       string
+	Timezone       string
+}
+
 func (s *Service) SendConfirmation(to string, data ConfirmationData) error {
 	return s.send(to, fmt.Sprintf("Booking Confirmed – %s", data.ResourceName), "confirmation.html", data)
 }
@@ -156,6 +170,10 @@ func (s *Service) SendStaffCancellation(to string, data StaffCancellationData) e
 
 func (s *Service) SendStaffCompletion(to string, data StaffCompletionData) error {
 	return s.send(to, fmt.Sprintf("Session Complete – Action Required – %s", data.ResourceName), "staff_completion.html", data)
+}
+
+func (s *Service) SendStaffChargeFailure(to string, data StaffChargeFailureData) error {
+	return s.send(to, fmt.Sprintf("⚠️ Charge Failed – %s – %s", data.BookerName, data.ResourceName), "staff_charge_failure.html", data)
 }
 
 func (s *Service) send(to, subject, tmplName string, data any) error {

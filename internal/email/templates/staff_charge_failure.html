@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8"><title>Charge Failed</title></head>
+<body style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:24px;color:#1a1a1a;">
+  <h1 style="color:#dc2626;margin-bottom:4px;">⚠️ Charge Failed</h1>
+  <p style="color:#555;margin-top:0;">
+    A {{if eq .Source "auto"}}automatic{{else}}manual{{end}} charge attempt at <strong>{{.ResourceName}}</strong> failed.
+    This booking has now failed <strong>{{.ChargeAttempts}} time{{if gt .ChargeAttempts 1}}s{{end}}</strong>.
+  </p>
+
+  <div style="background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:20px;margin:16px 0;">
+    <p style="margin:0 0 8px;"><strong>Name:</strong> {{.BookerName}}</p>
+    <p style="margin:0 0 8px;"><strong>Email:</strong> {{.BookerEmail}}</p>
+    <p style="margin:0 0 8px;"><strong>Date:</strong> {{formatTime .StartTime .Timezone}} – {{formatTime .EndTime .Timezone}}</p>
+    <p style="margin:0 0 8px;"><strong>Amount attempted:</strong> {{formatMoney .AmountCents}}</p>
+    <p style="margin:0;border-top:1px solid #fecaca;padding-top:12px;margin-top:12px;color:#dc2626;">
+      <strong>Error:</strong> {{.ErrorMessage}}
+    </p>
+  </div>
+
+  <p style="margin:20px 0;">
+    <a href="{{.AdminURL}}" style="display:inline-block;background:#dc2626;color:white;padding:10px 20px;border-radius:6px;text-decoration:none;">Review in Admin</a>
+  </p>
+
+  <p style="color:#9ca3af;font-size:12px;border-top:1px solid #e5e7eb;padding-top:16px;">
+    {{if eq .Source "manual"}}Please retry the charge manually or contact the customer to update their payment method.
+    {{- else if lt .ChargeAttempts 2}}The auto-charge will retry once more on the next scheduler tick (every 30 minutes).
+    {{- else}}This was the final automatic retry. <strong style="color:#dc2626;">No further automatic attempts will be made.</strong> Please charge manually or contact the customer to update their payment method.
+    {{- end}}
+  </p>
+</body>
+</html>

@@ -167,7 +167,8 @@ func (s *Scheduler) autoChargeCompleted(ctx context.Context, settings *db.Settin
 		}
 		amountCents := hours * settings.HourlyRateCents
 		if amountCents <= 0 || amountCents > maxChargeAmountCents {
-			_ = s.queries.RevertBookingFromChargingToCompleted(ctx, b.ID)
+			msg := fmt.Sprintf("computed charge amount %d cents is out of allowed range", amountCents)
+			_ = s.queries.RevertBookingFromChargingToCompleted(ctx, b.ID, msg)
 			s.logger.Warn("scheduler auto-charge amount out of range",
 				"booking_id", b.ID, "email", b.Email, "amount_cents", amountCents)
 			continue
@@ -178,8 +179,28 @@ func (s *Scheduler) autoChargeCompleted(ctx context.Context, settings *db.Settin
 
 		piID, receiptURL, err := s.stripe.ChargePaymentMethod(*b.StripePaymentMethodID, int64(amountCents), settings.Currency, description, idempotencyKey)
 		if err != nil {
-			_ = s.queries.RevertBookingFromChargingToCompleted(ctx, b.ID)
+			_ = s.queries.RevertBookingFromChargingToCompleted(ctx, b.ID, err.Error())
 			s.logger.Error("scheduler auto-charge stripe failed", "booking_id", b.ID, "email", b.Email, "error", err)
+			go func(booking *db.Booking, amount int32, chargeErr string) {
+				failureData := email.StaffChargeFailureData{
+					ResourceName:   settings.ResourceName,
+					BookerName:     booking.Name,
+					BookerEmail:    booking.Email,
+					StartTime:      booking.StartTime,
+					EndTime:        booking.EndTime,
+					AmountCents:    amount,
+					ChargeAttempts: booking.ChargeAttempts + 1,
+					ErrorMessage:   chargeErr,
+					Source:         "auto",
+					AdminURL:       s.appURL + "/admin/bookings",
+					Timezone:       settings.Timezone,
+				}
+				for _, addr := range splitEmails(settings.NotificationEmails) {
+					if emailErr := s.email.SendStaffChargeFailure(addr, failureData); emailErr != nil {
+						s.logger.Error("scheduler send charge failure email failed", "booking_id", booking.ID, "recipient", addr, "error", emailErr)
+					}
+				}
+			}(b, amountCents, err.Error())
 			continue
 		}
 

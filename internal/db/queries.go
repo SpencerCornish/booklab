@@ -237,6 +237,7 @@ func (q *Queries) ClaimBookingForAutoCharge(ctx context.Context, delayMinutes in
 			  AND stripe_payment_method_id IS NOT NULL
 			  AND stripe_payment_intent_id IS NULL
 			  AND amount_cents IS NULL
+			  AND charge_attempts < 2
 			ORDER BY completed_at
 			FOR UPDATE SKIP LOCKED
 			LIMIT 1
@@ -245,12 +246,16 @@ func (q *Queries) ClaimBookingForAutoCharge(ctx context.Context, delayMinutes in
 	return scanBooking(row)
 }
 
-// RevertBookingFromChargingToCompleted undoes a charge claim after a failed payment attempt.
-func (q *Queries) RevertBookingFromChargingToCompleted(ctx context.Context, id int32) error {
+// RevertBookingFromChargingToCompleted undoes a charge claim after a failed payment attempt,
+// recording the error message and incrementing the attempt counter.
+func (q *Queries) RevertBookingFromChargingToCompleted(ctx context.Context, id int32, chargeErr string) error {
 	_, err := q.pool.Exec(ctx, `
-		UPDATE bookings SET status = 'completed'
+		UPDATE bookings
+		SET status = 'completed',
+		    charge_attempts   = charge_attempts + 1,
+		    last_charge_error = $2
 		WHERE id = $1 AND status = 'charging'`,
-		id,
+		id, chargeErr,
 	)
 	return err
 }
@@ -299,7 +304,8 @@ func (q *Queries) CancelBooking(ctx context.Context, token uuid.UUID) (*Booking,
 
 const bookingColumns = `id, name, email, metadata, start_time, end_time, status, cancel_token,
 	stripe_setup_intent_id, stripe_payment_method_id, stripe_payment_intent_id,
-	stripe_receipt_url, amount_cents, reminder_sent, completed_at, created_at, updated_at`
+	stripe_receipt_url, amount_cents, reminder_sent, completed_at,
+	charge_attempts, last_charge_error, created_at, updated_at`
 
 func scanBooking(row pgx.Row) (*Booking, error) {
 	var b Booking
@@ -307,7 +313,7 @@ func scanBooking(row pgx.Row) (*Booking, error) {
 		&b.ID, &b.Name, &b.Email, &b.Metadata, &b.StartTime, &b.EndTime, &b.Status, &b.CancelToken,
 		&b.StripeSetupIntentID, &b.StripePaymentMethodID, &b.StripePaymentIntentID,
 		&b.StripeReceiptURL, &b.AmountCents, &b.ReminderSent, &b.CompletedAt,
-		&b.CreatedAt, &b.UpdatedAt,
+		&b.ChargeAttempts, &b.LastChargeError, &b.CreatedAt, &b.UpdatedAt,
 	)
 	if err != nil {
 		return nil, err

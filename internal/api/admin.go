@@ -249,7 +249,7 @@ func (s *Server) handleAdminChargeBooking(w http.ResponseWriter, r *http.Request
 
 	settings, err := s.queries.GetSettings(r.Context())
 	if err != nil {
-		_ = s.queries.RevertBookingFromChargingToCompleted(r.Context(), id)
+		_ = s.queries.RevertBookingFromChargingToCompleted(r.Context(), id, "internal: failed to load settings")
 		s.writeError(w, r, http.StatusInternalServerError, "failed to load settings", err)
 		return
 	}
@@ -257,7 +257,7 @@ func (s *Server) handleAdminChargeBooking(w http.ResponseWriter, r *http.Request
 	var amountCents int32
 	if req.AmountCents != nil {
 		if *req.AmountCents <= 0 || *req.AmountCents > maxChargeAmountCents {
-			_ = s.queries.RevertBookingFromChargingToCompleted(r.Context(), id)
+			_ = s.queries.RevertBookingFromChargingToCompleted(r.Context(), id, "internal: invalid amount_cents provided")
 			s.writeError(w, r, http.StatusBadRequest, "invalid amount_cents", nil)
 			return
 		}
@@ -269,7 +269,7 @@ func (s *Server) handleAdminChargeBooking(w http.ResponseWriter, r *http.Request
 		}
 		amountCents = hours * settings.HourlyRateCents
 		if amountCents <= 0 || amountCents > maxChargeAmountCents {
-			_ = s.queries.RevertBookingFromChargingToCompleted(r.Context(), id)
+			_ = s.queries.RevertBookingFromChargingToCompleted(r.Context(), id, "internal: computed charge amount is out of allowed range")
 			s.writeError(w, r, http.StatusBadRequest, "computed charge amount is out of allowed range", nil)
 			return
 		}
@@ -279,8 +279,28 @@ func (s *Server) handleAdminChargeBooking(w http.ResponseWriter, r *http.Request
 	idempotencyKey := fmt.Sprintf("charge-booking-%d-admin", id)
 	piID, receiptURL, err := s.stripe.ChargePaymentMethod(*booking.StripePaymentMethodID, int64(amountCents), settings.Currency, description, idempotencyKey)
 	if err != nil {
-		_ = s.queries.RevertBookingFromChargingToCompleted(r.Context(), id)
+		_ = s.queries.RevertBookingFromChargingToCompleted(r.Context(), id, err.Error())
 		s.logger.Error("admin charge stripe failed", "booking_id", id, "email", booking.Email, "error", err)
+		go func(chargeErr string) {
+			failureData := emailsvc.StaffChargeFailureData{
+				ResourceName:   settings.ResourceName,
+				BookerName:     booking.Name,
+				BookerEmail:    booking.Email,
+				StartTime:      booking.StartTime,
+				EndTime:        booking.EndTime,
+				AmountCents:    amountCents,
+				ChargeAttempts: booking.ChargeAttempts + 1,
+				ErrorMessage:   chargeErr,
+				Source:         "manual",
+				AdminURL:       s.cfg.AppURL + "/admin/bookings",
+				Timezone:       settings.Timezone,
+			}
+			for _, addr := range splitEmails(settings.NotificationEmails) {
+				if emailErr := s.email.SendStaffChargeFailure(addr, failureData); emailErr != nil {
+					s.logger.Error("admin send charge failure email failed", "booking_id", id, "recipient", addr, "error", emailErr)
+				}
+			}
+		}(err.Error())
 		s.writeError(w, r, http.StatusInternalServerError, "payment failed", err)
 		return
 	}

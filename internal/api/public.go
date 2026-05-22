@@ -484,5 +484,7 @@ func bookingToAdmin(b *db.Booking) map[string]any {
 	m["metadata"] = b.Metadata
 	m["reminder_sent"] = b.ReminderSent
 	m["updated_at"] = b.UpdatedAt
+	m["charge_attempts"] = b.ChargeAttempts
+	m["last_charge_error"] = b.LastChargeError
 	return m
 }

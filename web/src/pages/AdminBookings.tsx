@@ -200,11 +200,20 @@ function getAutoChargeInfo(booking: BookingAdmin, settings: Settings | null) {
 }
 
 function BookingStatusBadges({ booking }: { booking: BookingAdmin }) {
+  const failures = booking.charge_attempts ?? 0
   return (
     <div className="flex flex-wrap gap-1 items-start">
       <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium capitalize ${statusColors[booking.status] ?? 'bg-gray-100 text-gray-500'}`}>
         {booking.status}
       </span>
+      {failures > 0 && booking.status !== 'charged' && (
+        <span
+          className="inline-block px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-700 cursor-help"
+          title={booking.last_charge_error ?? undefined}
+        >
+          {failures} charge failure{failures > 1 ? 's' : ''}
+        </span>
+      )}
       {booking.reminder_sent && (
         <span className="inline-block px-2 py-0.5 rounded-full text-xs font-medium bg-teal-50 text-teal-600">
           reminder sent
@@ -374,6 +383,17 @@ function BookingDetailPanel({
           )}
         </div>
       </div>
+      {(booking.charge_attempts ?? 0) > 0 && (
+        <div>
+          <p className="font-medium text-gray-500 uppercase tracking-wide mb-1">Charge failures</p>
+          <div className="space-y-1">
+            <p className="text-red-600">{booking.charge_attempts} failed attempt{(booking.charge_attempts ?? 0) > 1 ? 's' : ''}</p>
+            {booking.last_charge_error && (
+              <p className="text-gray-600 font-mono text-xs break-all">{booking.last_charge_error}</p>
+            )}
+          </div>
+        </div>
+      )}
       {metadataEntries.length > 0 && (
         <div>
           <p className="font-medium text-gray-500 uppercase tracking-wide mb-1">Metadata</p>

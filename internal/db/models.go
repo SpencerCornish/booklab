@@ -35,6 +35,8 @@ type Booking struct {
 	AmountCents           *int32            `json:"amount_cents"`
 	ReminderSent          bool              `json:"reminder_sent"`
 	CompletedAt           *time.Time        `json:"completed_at"`
+	ChargeAttempts        int32             `json:"charge_attempts"`
+	LastChargeError       *string           `json:"last_charge_error"`
 	CreatedAt             time.Time         `json:"created_at"`
 	UpdatedAt             time.Time         `json:"updated_at"`
 }

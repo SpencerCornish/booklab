@@ -51,6 +51,8 @@ export interface BookingAdmin extends BookingPublic {
   metadata?: Record<string, string>
   reminder_sent?: boolean
   updated_at?: string
+  charge_attempts?: number
+  last_charge_error?: string
 }
 
 export interface CreateBookingResponse {
