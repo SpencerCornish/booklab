@@ -1,4 +1,4 @@
-export type BookingStatus = 'confirmed' | 'cancelled' | 'completed' | 'charged'
+export type BookingStatus = 'confirmed' | 'cancelled' | 'completed' | 'charging' | 'charged'
 
 export interface PublicSettings {
   resource_name: string
@@ -14,6 +14,7 @@ export interface PublicSettings {
 export interface Settings extends PublicSettings {
   reminder_hours_before: number
   notification_emails: string
+  auto_charge_delay_minutes: number
 }
 
 export interface TimeSlot {
@@ -47,6 +48,9 @@ export interface BookingAdmin extends BookingPublic {
   stripe_receipt_url?: string
   amount_cents?: number
   completed_at?: string
+  metadata?: Record<string, string>
+  reminder_sent?: boolean
+  updated_at?: string
 }
 
 export interface CreateBookingResponse {

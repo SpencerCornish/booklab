@@ -198,7 +198,7 @@ func (s *Server) handleAdminUpdateBooking(w http.ResponseWriter, r *http.Request
 				StartTime:       booking.StartTime,
 				EndTime:         booking.EndTime,
 				AutoAmountCents: autoAmount,
-				AutoChargeAt:    time.Now().Add(24 * time.Hour),
+				AutoChargeAt:    time.Now().Add(time.Duration(settings.AutoChargeDelayMinutes) * time.Minute),
 				AdminURL:        s.cfg.AppURL + "/admin/bookings",
 				Timezone:        settings.Timezone,
 			}
@@ -325,30 +325,32 @@ func (s *Server) handleAdminGetSettings(w http.ResponseWriter, r *http.Request) 
 
 func (s *Server) handleAdminUpdateSettings(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		ResourceName        *string `json:"resource_name"`
-		HourlyRateCents     *int32  `json:"hourly_rate_cents"`
-		Currency            *string `json:"currency"`
-		Timezone            *string `json:"timezone"`
-		BookableStart       *string `json:"bookable_start"`
-		BookableEnd         *string `json:"bookable_end"`
-		MinHours            *int32  `json:"min_hours"`
-		MaxHours            *int32  `json:"max_hours"`
-		ReminderHoursBefore *int32  `json:"reminder_hours_before"`
-		NotificationEmails  *string `json:"notification_emails"`
+		ResourceName             *string `json:"resource_name"`
+		HourlyRateCents          *int32  `json:"hourly_rate_cents"`
+		Currency                 *string `json:"currency"`
+		Timezone                 *string `json:"timezone"`
+		BookableStart            *string `json:"bookable_start"`
+		BookableEnd              *string `json:"bookable_end"`
+		MinHours                 *int32  `json:"min_hours"`
+		MaxHours                 *int32  `json:"max_hours"`
+		ReminderHoursBefore      *int32  `json:"reminder_hours_before"`
+		NotificationEmails       *string `json:"notification_emails"`
+		AutoChargeDelayMinutes   *int32  `json:"auto_charge_delay_minutes"`
 	}
 	if !s.readJSONRequest(w, r, &req) {
 		return
 	}
 
 	params := db.UpdateSettingsParams{
-		ResourceName:        req.ResourceName,
-		HourlyRateCents:     req.HourlyRateCents,
-		Currency:            req.Currency,
-		Timezone:            req.Timezone,
-		MinHours:            req.MinHours,
-		MaxHours:            req.MaxHours,
-		ReminderHoursBefore: req.ReminderHoursBefore,
-		NotificationEmails:  req.NotificationEmails,
+		ResourceName:             req.ResourceName,
+		HourlyRateCents:          req.HourlyRateCents,
+		Currency:                 req.Currency,
+		Timezone:                 req.Timezone,
+		MinHours:                 req.MinHours,
+		MaxHours:                 req.MaxHours,
+		ReminderHoursBefore:      req.ReminderHoursBefore,
+		NotificationEmails:       req.NotificationEmails,
+		AutoChargeDelayMinutes:   req.AutoChargeDelayMinutes,
 	}
 
 	if req.BookableStart != nil {
@@ -478,16 +480,17 @@ func parseID(r *http.Request) (int32, error) {
 
 func settingsToMap(s *db.Settings) map[string]any {
 	return map[string]any{
-		"resource_name":         s.ResourceName,
-		"hourly_rate_cents":     s.HourlyRateCents,
-		"currency":              s.Currency,
-		"timezone":              s.Timezone,
-		"bookable_start":        s.BookableStart.Format("15:04"),
-		"bookable_end":          s.BookableEnd.Format("15:04"),
-		"min_hours":             s.MinHours,
-		"max_hours":             s.MaxHours,
-		"reminder_hours_before": s.ReminderHoursBefore,
-		"notification_emails":   s.NotificationEmails,
+		"resource_name":              s.ResourceName,
+		"hourly_rate_cents":          s.HourlyRateCents,
+		"currency":                   s.Currency,
+		"timezone":                   s.Timezone,
+		"bookable_start":             s.BookableStart.Format("15:04"),
+		"bookable_end":               s.BookableEnd.Format("15:04"),
+		"min_hours":                  s.MinHours,
+		"max_hours":                  s.MaxHours,
+		"reminder_hours_before":      s.ReminderHoursBefore,
+		"notification_emails":        s.NotificationEmails,
+		"auto_charge_delay_minutes":  s.AutoChargeDelayMinutes,
 	}
 }
 

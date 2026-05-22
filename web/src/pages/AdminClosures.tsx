@@ -43,7 +43,7 @@ function ClosureFormPanel({
   return (
     <form onSubmit={handleSubmit} className="bg-gray-50 rounded-xl border border-gray-200 p-5 space-y-3">
       <h3 className="font-semibold text-gray-800 text-sm">{initial ? 'Edit Closure' : 'New Closure'}</h3>
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div>
           <label className="block text-xs font-medium text-gray-600 mb-1">Start date</label>
           <input
@@ -142,7 +142,7 @@ export default function AdminClosures() {
   }
 
   return (
-    <div className="p-8">
+    <div className="p-4 sm:p-8">
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-bold text-gray-900">Closures</h1>
         <button

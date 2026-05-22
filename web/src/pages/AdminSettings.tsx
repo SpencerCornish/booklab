@@ -59,7 +59,7 @@ export default function AdminSettings() {
   }
 
   return (
-    <div className="p-8 max-w-2xl">
+    <div className="p-4 sm:p-8 max-w-2xl">
       <h1 className="text-2xl font-bold text-gray-900 mb-6">Settings</h1>
       <form onSubmit={handleSubmit} className="space-y-6">
         <section>
@@ -68,7 +68,7 @@ export default function AdminSettings() {
             <Field label="Resource name" hint="Used in emails and the booking page">
               <input type="text" required className={inputClass} {...field('resource_name')} />
             </Field>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <Field label="Hourly rate (cents)">
                 <input type="number" min="0" required className={inputClass} {...numberField('hourly_rate_cents')} />
               </Field>
@@ -85,7 +85,7 @@ export default function AdminSettings() {
         <section>
           <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">Booking hours</h2>
           <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-4">
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <Field label="Open time (HH:MM)">
                 <input type="time" required className={inputClass} {...field('bookable_start')} />
               </Field>
@@ -93,7 +93,7 @@ export default function AdminSettings() {
                 <input type="time" required className={inputClass} {...field('bookable_end')} />
               </Field>
             </div>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <Field label="Min hours">
                 <input type="number" min="1" required className={inputClass} {...numberField('min_hours')} />
               </Field>
@@ -101,6 +101,18 @@ export default function AdminSettings() {
                 <input type="number" min="1" required className={inputClass} {...numberField('max_hours')} />
               </Field>
             </div>
+          </div>
+        </section>
+
+        <section>
+          <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">Billing</h2>
+          <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-4">
+            <Field
+              label="Auto-charge delay (minutes)"
+              hint="How long after a session is marked complete before the card is automatically charged. Default 1440 (24 hours). Set lower (e.g. 30) for testing."
+            >
+              <input type="number" min="1" required className={inputClass} {...numberField('auto_charge_delay_minutes')} />
+            </Field>
           </div>
         </section>
 

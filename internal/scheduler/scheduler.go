@@ -79,6 +79,11 @@ func (s *Scheduler) completeExpiredBookings(ctx context.Context, settings *db.Se
 			if hours < 1 {
 				hours = 1
 			}
+			delay := time.Duration(settings.AutoChargeDelayMinutes) * time.Minute
+			autoChargeAt := b.EndTime.Add(delay)
+			if b.CompletedAt != nil {
+				autoChargeAt = b.CompletedAt.Add(delay)
+			}
 			staffData := email.StaffCompletionData{
 				ResourceName:    settings.ResourceName,
 				BookerName:      b.Name,
@@ -86,7 +91,7 @@ func (s *Scheduler) completeExpiredBookings(ctx context.Context, settings *db.Se
 				StartTime:       b.StartTime,
 				EndTime:         b.EndTime,
 				AutoAmountCents: hours * settings.HourlyRateCents,
-				AutoChargeAt:    b.EndTime.Add(24 * time.Hour),
+				AutoChargeAt:    autoChargeAt,
 				AdminURL:        s.appURL + "/admin/bookings",
 				Timezone:        settings.Timezone,
 			}
@@ -147,7 +152,7 @@ const maxChargeAmountCents int32 = 20_000
 func (s *Scheduler) autoChargeCompleted(ctx context.Context, settings *db.Settings) int {
 	charged := 0
 	for {
-		b, err := s.queries.ClaimBookingForAutoCharge(ctx)
+		b, err := s.queries.ClaimBookingForAutoCharge(ctx, settings.AutoChargeDelayMinutes)
 		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
 				return charged
@@ -180,11 +185,14 @@ func (s *Scheduler) autoChargeCompleted(ctx context.Context, settings *db.Settin
 
 		updated, err := s.queries.UpdateBookingCharged(ctx, b.ID, piID, receiptURL, amountCents)
 		if err != nil {
+			// Stripe already charged — do not revert to 'completed' (would cause a double charge on retry).
+			// Leave the row in 'charging' so a human can reconcile, and log enough to find it.
 			if errors.Is(err, pgx.ErrNoRows) {
-				s.logger.Error("scheduler auto-charge db finalize failed after stripe success",
+				s.logger.Error("scheduler auto-charge db finalize failed after stripe success — booking stuck in charging, requires manual reconciliation",
 					"booking_id", b.ID, "email", b.Email, "payment_intent_id", piID)
 			} else {
-				s.logger.Error("scheduler record auto-charge failed", "booking_id", b.ID, "email", b.Email, "error", err)
+				s.logger.Error("scheduler record auto-charge failed after stripe success — booking stuck in charging, requires manual reconciliation",
+					"booking_id", b.ID, "email", b.Email, "payment_intent_id", piID, "error", err)
 			}
 			continue
 		}

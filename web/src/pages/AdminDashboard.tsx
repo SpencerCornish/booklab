@@ -55,11 +55,11 @@ export default function AdminDashboard() {
   }
 
   return (
-    <div className="p-8">
+    <div className="p-4 sm:p-8">
       <h1 className="text-2xl font-bold text-gray-900 mb-6">Dashboard</h1>
 
       {/* Stats row */}
-      <div className="grid grid-cols-3 gap-4 mb-8">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
         {[
           { label: "Today's bookings", value: todayBookings.length },
           { label: 'Upcoming', value: upcoming.length },
@@ -79,7 +79,7 @@ export default function AdminDashboard() {
       {todayBookings.length > 0 && (
         <section className="mb-8">
           <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">Today</h2>
-          <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+          <div className="bg-white rounded-xl border border-gray-200 overflow-x-auto">
             <table className="w-full">
               <thead className="bg-gray-50 border-b border-gray-200">
                 <tr>
@@ -104,7 +104,7 @@ export default function AdminDashboard() {
       {needsCharge.length > 0 && (
         <section>
           <h2 className="text-sm font-semibold text-amber-600 uppercase tracking-wider mb-3">Needs Charge</h2>
-          <div className="bg-white rounded-xl border border-amber-200 overflow-hidden">
+          <div className="bg-white rounded-xl border border-amber-200 overflow-x-auto">
             <table className="w-full">
               <thead className="bg-amber-50 border-b border-amber-100">
                 <tr>

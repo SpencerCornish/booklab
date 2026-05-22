@@ -1,1 +1,0 @@
-Run `make build-web` (or `cd web && pnpm run build`) to populate this directory with the production SPA before embedding.

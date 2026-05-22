@@ -481,5 +481,8 @@ func bookingToAdmin(b *db.Booking) map[string]any {
 	m["stripe_receipt_url"] = b.StripeReceiptURL
 	m["amount_cents"] = b.AmountCents
 	m["completed_at"] = b.CompletedAt
+	m["metadata"] = b.Metadata
+	m["reminder_sent"] = b.ReminderSent
+	m["updated_at"] = b.UpdatedAt
 	return m
 }

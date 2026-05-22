@@ -22,44 +22,47 @@ func New(pool *pgxpool.Pool) *Queries {
 
 func (q *Queries) GetSettings(ctx context.Context) (*Settings, error) {
 	row := q.pool.QueryRow(ctx, `SELECT id, resource_name, hourly_rate_cents, currency, timezone,
-		bookable_start, bookable_end, min_hours, max_hours, reminder_hours_before, notification_emails
+		bookable_start, bookable_end, min_hours, max_hours, reminder_hours_before, notification_emails,
+		auto_charge_delay_minutes
 		FROM settings WHERE id = 1`)
 	return scanSettings(row)
 }
 
 type UpdateSettingsParams struct {
-	ResourceName        *string
-	HourlyRateCents     *int32
-	Currency            *string
-	Timezone            *string
-	BookableStart       *time.Time
-	BookableEnd         *time.Time
-	MinHours            *int32
-	MaxHours            *int32
-	ReminderHoursBefore *int32
-	NotificationEmails  *string
+	ResourceName             *string
+	HourlyRateCents          *int32
+	Currency                 *string
+	Timezone                 *string
+	BookableStart            *time.Time
+	BookableEnd              *time.Time
+	MinHours                 *int32
+	MaxHours                 *int32
+	ReminderHoursBefore      *int32
+	NotificationEmails       *string
+	AutoChargeDelayMinutes   *int32
 }
 
 func (q *Queries) UpdateSettings(ctx context.Context, p UpdateSettingsParams) (*Settings, error) {
 	row := q.pool.QueryRow(ctx, `
 		UPDATE settings SET
-			resource_name         = COALESCE($1, resource_name),
-			hourly_rate_cents     = COALESCE($2, hourly_rate_cents),
-			currency              = COALESCE($3, currency),
-			timezone              = COALESCE($4, timezone),
-			bookable_start        = COALESCE($5, bookable_start),
-			bookable_end          = COALESCE($6, bookable_end),
-			min_hours             = COALESCE($7, min_hours),
-			max_hours             = COALESCE($8, max_hours),
-			reminder_hours_before = COALESCE($9, reminder_hours_before),
-			notification_emails   = COALESCE($10, notification_emails)
+			resource_name               = COALESCE($1, resource_name),
+			hourly_rate_cents           = COALESCE($2, hourly_rate_cents),
+			currency                    = COALESCE($3, currency),
+			timezone                    = COALESCE($4, timezone),
+			bookable_start              = COALESCE($5, bookable_start),
+			bookable_end                = COALESCE($6, bookable_end),
+			min_hours                   = COALESCE($7, min_hours),
+			max_hours                   = COALESCE($8, max_hours),
+			reminder_hours_before       = COALESCE($9, reminder_hours_before),
+			notification_emails         = COALESCE($10, notification_emails),
+			auto_charge_delay_minutes   = COALESCE($11, auto_charge_delay_minutes)
 		WHERE id = 1
 		RETURNING id, resource_name, hourly_rate_cents, currency, timezone,
 			bookable_start, bookable_end, min_hours, max_hours, reminder_hours_before,
-			notification_emails`,
+			notification_emails, auto_charge_delay_minutes`,
 		p.ResourceName, p.HourlyRateCents, p.Currency, p.Timezone,
 		p.BookableStart, p.BookableEnd, p.MinHours, p.MaxHours, p.ReminderHoursBefore,
-		p.NotificationEmails,
+		p.NotificationEmails, p.AutoChargeDelayMinutes,
 	)
 	return scanSettings(row)
 }
@@ -69,7 +72,7 @@ func scanSettings(row pgx.Row) (*Settings, error) {
 	err := row.Scan(
 		&s.ID, &s.ResourceName, &s.HourlyRateCents, &s.Currency, &s.Timezone,
 		&s.BookableStart, &s.BookableEnd, &s.MinHours, &s.MaxHours, &s.ReminderHoursBefore,
-		&s.NotificationEmails,
+		&s.NotificationEmails, &s.AutoChargeDelayMinutes,
 	)
 	if err != nil {
 		return nil, err
@@ -221,13 +224,14 @@ func (q *Queries) ClaimBookingForCharge(ctx context.Context, id int32) (*Booking
 
 // ClaimBookingForAutoCharge claims the next eligible booking for auto-charge (at most one row).
 // Uses FOR UPDATE SKIP LOCKED so concurrent schedulers do not select the same booking.
-func (q *Queries) ClaimBookingForAutoCharge(ctx context.Context) (*Booking, error) {
+// delayMinutes is the configurable charge delay (default 1440 = 24 hours).
+func (q *Queries) ClaimBookingForAutoCharge(ctx context.Context, delayMinutes int32) (*Booking, error) {
 	row := q.pool.QueryRow(ctx, `
 		WITH pick AS (
 			SELECT id FROM bookings
 			WHERE status = 'completed'
 			  AND completed_at IS NOT NULL
-			  AND completed_at < NOW() - INTERVAL '24 hours'
+			  AND completed_at < NOW() - ($1 * interval '1 minute')
 			  AND stripe_payment_method_id IS NOT NULL
 			  AND stripe_payment_intent_id IS NULL
 			  AND amount_cents IS NULL
@@ -239,9 +243,7 @@ func (q *Queries) ClaimBookingForAutoCharge(ctx context.Context) (*Booking, erro
 		SET status = 'charging'
 		FROM pick
 		WHERE b.id = pick.id
-		RETURNING b.id, b.name, b.email, b.start_time, b.end_time, b.status, b.cancel_token,
-			b.stripe_setup_intent_id, b.stripe_payment_method_id, b.stripe_payment_intent_id,
-			b.stripe_receipt_url, b.amount_cents, b.reminder_sent, b.completed_at, b.created_at, b.updated_at`)
+		RETURNING `+bookingColumns, delayMinutes)
 	return scanBooking(row)
 }
 
@@ -255,16 +257,16 @@ func (q *Queries) RevertBookingFromChargingToCompleted(ctx context.Context, id i
 	return err
 }
 
-func (q *Queries) ListBookingsDueAutoCharge(ctx context.Context) ([]*Booking, error) {
+func (q *Queries) ListBookingsDueAutoCharge(ctx context.Context, delayMinutes int32) ([]*Booking, error) {
 	rows, err := q.pool.Query(ctx, `
 		SELECT `+bookingColumns+` FROM bookings
 		WHERE status = 'completed'
 		  AND completed_at IS NOT NULL
-		  AND completed_at < NOW() - INTERVAL '24 hours'
+		  AND completed_at < NOW() - ($1 * interval '1 minute')
 		  AND stripe_payment_method_id IS NOT NULL
 		  AND stripe_payment_intent_id IS NULL
 		  AND amount_cents IS NULL
-		ORDER BY completed_at`,
+		ORDER BY completed_at`, delayMinutes,
 	)
 	if err != nil {
 		return nil, err
