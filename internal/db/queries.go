@@ -227,7 +227,9 @@ func (q *Queries) ClaimBookingForCharge(ctx context.Context, id int32) (*Booking
 // delayMinutes is the configurable charge delay (default 1440 = 24 hours).
 func (q *Queries) ClaimBookingForAutoCharge(ctx context.Context, delayMinutes int32) (*Booking, error) {
 	row := q.pool.QueryRow(ctx, `
-		WITH pick AS (
+		UPDATE bookings
+		SET status = 'charging'
+		WHERE id = (
 			SELECT id FROM bookings
 			WHERE status = 'completed'
 			  AND completed_at IS NOT NULL
@@ -239,10 +241,6 @@ func (q *Queries) ClaimBookingForAutoCharge(ctx context.Context, delayMinutes in
 			FOR UPDATE SKIP LOCKED
 			LIMIT 1
 		)
-		UPDATE bookings AS b
-		SET status = 'charging'
-		FROM pick
-		WHERE b.id = pick.id
 		RETURNING `+bookingColumns, delayMinutes)
 	return scanBooking(row)
 }
