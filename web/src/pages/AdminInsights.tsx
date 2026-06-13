@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import { format } from 'date-fns'
+import { ResponsiveDataView } from '../components/admin/ResponsiveDataView'
 import { adminGetInsights } from '../lib/api'
-import type { InsightsData } from '../lib/types'
+import type { CustomerInsight, InsightsData } from '../lib/types'
 
 const statusLabels: Record<string, string> = {
   confirmed: 'Confirmed',
@@ -13,6 +14,41 @@ const statusLabels: Record<string, string> = {
 
 function formatCurrency(cents: number) {
   return `$${(cents / 100).toFixed(2)}`
+}
+
+function CustomerCard({ customer }: { customer: CustomerInsight }) {
+  return (
+    <div className="bg-white rounded-xl border border-gray-200 p-4">
+      <div className="mb-3">
+        <p className="text-sm font-semibold text-gray-900 truncate">{customer.name}</p>
+        <p className="text-xs text-gray-500 truncate">{customer.email}</p>
+      </div>
+      <div className="grid grid-cols-2 gap-3 text-sm">
+        <div>
+          <p className="text-xs text-gray-400">Bookings</p>
+          <p className="font-medium text-gray-800">{customer.booking_count}</p>
+        </div>
+        <div>
+          <p className="text-xs text-gray-400">Cancelled</p>
+          <p className="font-medium text-gray-600">
+            {customer.cancelled_count > 0 ? customer.cancelled_count : '—'}
+          </p>
+        </div>
+        <div>
+          <p className="text-xs text-gray-400">Revenue</p>
+          <p className="font-medium text-gray-800">{formatCurrency(customer.revenue_cents)}</p>
+        </div>
+        <div>
+          <p className="text-xs text-gray-400">Last visit</p>
+          <p className="font-medium text-gray-600">
+            {customer.last_booking_at
+              ? format(new Date(customer.last_booking_at), 'MMM d, yyyy')
+              : '—'}
+          </p>
+        </div>
+      </div>
+    </div>
+  )
 }
 
 export default function AdminInsights() {
@@ -154,57 +190,50 @@ export default function AdminInsights() {
         <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">
           Customers
         </h2>
-        <div className="bg-white rounded-xl border border-gray-200 overflow-x-auto">
-          {insights.customers.length === 0 ? (
-            <p className="px-4 py-6 text-sm text-gray-400">No customers yet.</p>
-          ) : (
-            <table className="w-full min-w-[640px]">
-              <thead className="bg-gray-50 border-b border-gray-200">
-                <tr>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">
-                    Customer
-                  </th>
-                  <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">
-                    Bookings
-                  </th>
-                  <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">
-                    Cancelled
-                  </th>
-                  <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">
-                    Revenue
-                  </th>
-                  <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">
-                    Last visit
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {insights.customers.map((customer) => (
-                  <tr key={customer.email} className="hover:bg-gray-50">
-                    <td className="px-4 py-3">
-                      <p className="text-sm font-medium text-gray-900">{customer.name}</p>
-                      <p className="text-xs text-gray-500">{customer.email}</p>
-                    </td>
-                    <td className="px-4 py-3 text-sm text-gray-600 text-right font-medium">
-                      {customer.booking_count}
-                    </td>
-                    <td className="px-4 py-3 text-sm text-gray-500 text-right">
-                      {customer.cancelled_count > 0 ? customer.cancelled_count : '—'}
-                    </td>
-                    <td className="px-4 py-3 text-sm text-gray-800 text-right font-medium">
-                      {formatCurrency(customer.revenue_cents)}
-                    </td>
-                    <td className="px-4 py-3 text-sm text-gray-500 text-right">
-                      {customer.last_booking_at
-                        ? format(new Date(customer.last_booking_at), 'MMM d, yyyy')
-                        : '—'}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
+        <ResponsiveDataView
+          items={insights.customers}
+          keyFn={(c) => c.email}
+          emptyMessage="No customers yet."
+          renderCard={(customer) => <CustomerCard customer={customer} />}
+          columns={[
+            {
+              header: 'Customer',
+              render: (customer) => (
+                <>
+                  <p className="text-sm font-medium text-gray-900">{customer.name}</p>
+                  <p className="text-xs text-gray-500">{customer.email}</p>
+                </>
+              ),
+            },
+            {
+              header: 'Bookings',
+              headerClassName: 'text-right',
+              cellClassName: 'text-sm text-gray-600 text-right font-medium',
+              render: (customer) => customer.booking_count,
+            },
+            {
+              header: 'Cancelled',
+              headerClassName: 'text-right',
+              cellClassName: 'text-sm text-gray-500 text-right',
+              render: (customer) => (customer.cancelled_count > 0 ? customer.cancelled_count : '—'),
+            },
+            {
+              header: 'Revenue',
+              headerClassName: 'text-right',
+              cellClassName: 'text-sm text-gray-800 text-right font-medium',
+              render: (customer) => formatCurrency(customer.revenue_cents),
+            },
+            {
+              header: 'Last visit',
+              headerClassName: 'text-right',
+              cellClassName: 'text-sm text-gray-500 text-right',
+              render: (customer) =>
+                customer.last_booking_at
+                  ? format(new Date(customer.last_booking_at), 'MMM d, yyyy')
+                  : '—',
+            },
+          ]}
+        />
         <p className="text-xs text-gray-400 mt-2">
           Sorted by collected revenue. Revenue reflects charged bookings only.
         </p>

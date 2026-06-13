@@ -1,30 +1,32 @@
 import { useEffect, useState } from 'react'
 import { format, isToday, isFuture } from 'date-fns'
 import { BookingCalendar } from '../components/BookingCalendar'
+import { BookingStatusBadge } from '../components/admin/bookingStatus'
+import { ResponsiveDataView } from '../components/admin/ResponsiveDataView'
 import { adminListBookings, adminListClosures } from '../lib/api'
 import type { BookingAdmin, Closure } from '../lib/types'
 
-const statusColors: Record<string, string> = {
-  confirmed: 'bg-green-100 text-green-700',
-  cancelled: 'bg-gray-100 text-gray-500',
-  completed: 'bg-blue-100 text-blue-700',
-  charged: 'bg-purple-100 text-purple-700',
-}
-
-function BookingRow({ booking }: { booking: BookingAdmin }) {
+function BookingSummaryCard({
+  booking,
+  borderClassName = 'border-gray-200',
+}: {
+  booking: BookingAdmin
+  borderClassName?: string
+}) {
   return (
-    <tr className="hover:bg-gray-50">
-      <td className="px-4 py-3 text-sm font-medium text-gray-900">{booking.name}</td>
-      <td className="px-4 py-3 text-sm text-gray-600">
+    <div className={`bg-white rounded-xl border p-4 ${borderClassName}`}>
+      <div className="flex items-start justify-between gap-3 mb-2">
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-semibold text-gray-900 truncate">{booking.name}</p>
+          <p className="text-xs text-gray-500 truncate">{booking.email}</p>
+        </div>
+        <BookingStatusBadge status={booking.status} />
+      </div>
+      <p className="text-sm text-gray-700">
+        {format(new Date(booking.start_time), 'MMM d, yyyy')} ·{' '}
         {format(new Date(booking.start_time), 'h:mm a')} – {format(new Date(booking.end_time), 'h:mm a')}
-      </td>
-      <td className="px-4 py-3">
-        <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium capitalize ${statusColors[booking.status]}`}>
-          {booking.status}
-        </span>
-      </td>
-      <td className="px-4 py-3 text-sm text-gray-500">{booking.email}</td>
-    </tr>
+      </p>
+    </div>
   )
 }
 
@@ -65,7 +67,6 @@ export default function AdminDashboard() {
     <div className="p-4 sm:p-8">
       <h1 className="text-2xl font-bold text-gray-900 mb-6">Dashboard</h1>
 
-      {/* Stats row */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
         {[
           { label: "Today's bookings", value: todayBookings.length },
@@ -103,11 +104,7 @@ export default function AdminDashboard() {
                 <p className="font-semibold text-gray-900">{selectedBooking.name}</p>
                 <p className="text-sm text-gray-500 mt-0.5">{selectedBooking.email}</p>
               </div>
-              <span
-                className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium capitalize ${statusColors[selectedBooking.status]}`}
-              >
-                {selectedBooking.status}
-              </span>
+              <BookingStatusBadge status={selectedBooking.status} />
             </div>
             <p className="text-sm text-gray-600 mt-3">
               {format(new Date(selectedBooking.start_time), 'EEEE, MMM d')} ·{' '}
@@ -150,65 +147,76 @@ export default function AdminDashboard() {
         )}
       </section>
 
-      {/* Today's bookings */}
       {todayBookings.length > 0 && (
         <section className="mb-8">
           <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">Today</h2>
-          <div className="bg-white rounded-xl border border-gray-200 overflow-x-auto">
-            <table className="w-full">
-              <thead className="bg-gray-50 border-b border-gray-200">
-                <tr>
-                  {['Name', 'Time', 'Status', 'Email'].map((h) => (
-                    <th key={h} className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">
-                      {h}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {todayBookings.map((b) => (
-                  <BookingRow key={b.id} booking={b} />
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <ResponsiveDataView
+            items={todayBookings}
+            keyFn={(b) => b.id}
+            renderCard={(b) => <BookingSummaryCard booking={b} />}
+            columns={[
+              {
+                header: 'Name',
+                render: (b) => <span className="text-sm font-medium text-gray-900">{b.name}</span>,
+              },
+              {
+                header: 'Time',
+                cellClassName: 'text-sm text-gray-600',
+                render: (b) =>
+                  `${format(new Date(b.start_time), 'h:mm a')} – ${format(new Date(b.end_time), 'h:mm a')}`,
+              },
+              {
+                header: 'Status',
+                render: (b) => <BookingStatusBadge status={b.status} />,
+              },
+              {
+                header: 'Email',
+                cellClassName: 'text-sm text-gray-500',
+                render: (b) => b.email,
+              },
+            ]}
+          />
         </section>
       )}
 
-      {/* Needs charge */}
       {needsCharge.length > 0 && (
         <section>
           <h2 className="text-sm font-semibold text-amber-600 uppercase tracking-wider mb-3">Needs Charge</h2>
-          <div className="bg-white rounded-xl border border-amber-200 overflow-x-auto">
-            <table className="w-full">
-              <thead className="bg-amber-50 border-b border-amber-100">
-                <tr>
-                  {['Name', 'Date', 'Status', 'Email'].map((h) => (
-                    <th key={h} className="px-4 py-2 text-left text-xs font-medium text-amber-700 uppercase">
-                      {h}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {needsCharge.map((b) => (
-                  <tr key={b.id} className="hover:bg-gray-50">
-                    <td className="px-4 py-3 text-sm font-medium text-gray-900">{b.name}</td>
-                    <td className="px-4 py-3 text-sm text-gray-600">
-                      {format(new Date(b.start_time), 'MMM d')} · {format(new Date(b.start_time), 'h:mm a')}–{format(new Date(b.end_time), 'h:mm a')}
-                    </td>
-                    <td className="px-4 py-3">
-                      <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium capitalize ${statusColors[b.status]}`}>
-                        {b.status}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-sm text-gray-500">{b.email}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <p className="text-xs text-gray-400 mt-2">Go to <a href="/admin/bookings" className="text-blue-600 hover:underline">Bookings</a> to charge.</p>
+          <ResponsiveDataView
+            items={needsCharge}
+            keyFn={(b) => b.id}
+            panelClassName="bg-white rounded-xl border border-amber-200"
+            theadClassName="bg-amber-50 border-b border-amber-100"
+            renderCard={(b) => <BookingSummaryCard booking={b} borderClassName="border-amber-200" />}
+            columns={[
+              {
+                header: 'Name',
+                headerClassName: 'text-amber-700',
+                render: (b) => <span className="text-sm font-medium text-gray-900">{b.name}</span>,
+              },
+              {
+                header: 'Date',
+                headerClassName: 'text-amber-700',
+                cellClassName: 'text-sm text-gray-600',
+                render: (b) =>
+                  `${format(new Date(b.start_time), 'MMM d')} · ${format(new Date(b.start_time), 'h:mm a')}–${format(new Date(b.end_time), 'h:mm a')}`,
+              },
+              {
+                header: 'Status',
+                headerClassName: 'text-amber-700',
+                render: (b) => <BookingStatusBadge status={b.status} />,
+              },
+              {
+                header: 'Email',
+                headerClassName: 'text-amber-700',
+                cellClassName: 'text-sm text-gray-500',
+                render: (b) => b.email,
+              },
+            ]}
+          />
+          <p className="text-xs text-gray-400 mt-2">
+            Go to <a href="/admin/bookings" className="text-blue-600 hover:underline">Bookings</a> to charge.
+          </p>
         </section>
       )}
     </div>

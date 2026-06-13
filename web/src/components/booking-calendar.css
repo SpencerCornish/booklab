@@ -66,3 +66,19 @@
 .booking-calendar .rbc-off-range-bg {
   background-color: #fafafa;
 }
+
+@media (max-width: 767px) {
+  .booking-calendar .rbc-header {
+    font-size: 0.7rem;
+    padding: 0.375rem 0;
+  }
+
+  .booking-calendar .rbc-event {
+    padding: 0.0625rem 0.25rem;
+    font-size: 0.75rem;
+  }
+
+  .booking-calendar .rbc-toolbar-label {
+    font-size: 0.875rem;
+  }
+}

@@ -60,8 +60,16 @@ export function AdminLayout() {
           sidebarOpen ? 'translate-x-0' : '-translate-x-full'
         }`}
       >
-        <div className="px-5 py-6 border-b border-gray-700">
+        <div className="px-5 py-6 border-b border-gray-700 flex items-center justify-between">
           <span className="font-semibold text-lg tracking-tight">BookLab Admin</span>
+          <button
+            type="button"
+            onClick={closeSidebar}
+            className="md:hidden p-1 rounded-md text-gray-400 hover:text-white hover:bg-gray-800 transition-colors"
+            aria-label="Close menu"
+          >
+            <span className="text-xl leading-none">×</span>
+          </button>
         </div>
         <nav className="flex-1 px-3 py-4 space-y-1">
           {navItems.map((item) => (

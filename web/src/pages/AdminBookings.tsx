@@ -1,5 +1,6 @@
 import { Fragment, useEffect, useState } from 'react'
 import { format } from 'date-fns'
+import { statusColors } from '../components/admin/bookingStatus'
 import { adminListBookings, adminChargeBooking, adminUpdateBooking, adminGetSettings, ApiError } from '../lib/api'
 import type { BookingAdmin, BookingStatus, Settings } from '../lib/types'
 
@@ -30,7 +31,7 @@ function CancelModal({
   }
 
   return (
-    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 px-4">
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-[60] px-4">
       <div className="bg-white rounded-2xl shadow-xl p-6 max-w-sm w-full">
         <h2 className="text-lg font-bold text-gray-900 mb-1">Cancel Booking</h2>
         <p className="text-sm text-gray-500 mb-4">
@@ -61,14 +62,6 @@ function CancelModal({
       </div>
     </div>
   )
-}
-
-const statusColors: Record<string, string> = {
-  confirmed: 'bg-green-100 text-green-700',
-  cancelled: 'bg-gray-100 text-gray-500',
-  completed: 'bg-blue-100 text-blue-700',
-  charging: 'bg-yellow-100 text-yellow-700',
-  charged: 'bg-purple-100 text-purple-700',
 }
 
 function CopyButton({ value }: { value: string }) {
@@ -134,7 +127,7 @@ function ChargeModal({
   }
 
   return (
-    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 px-4">
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-[60] px-4">
       <div className="bg-white rounded-2xl shadow-xl p-6 max-w-sm w-full">
         <h2 className="text-lg font-bold text-gray-900 mb-1">Charge Booking</h2>
         <p className="text-sm text-gray-500 mb-4">

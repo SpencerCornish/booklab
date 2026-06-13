@@ -1,7 +1,8 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Calendar, dateFnsLocalizer, type View } from 'react-big-calendar'
 import { format, parse, startOfWeek, getDay } from 'date-fns'
 import { enUS } from 'date-fns/locale/en-US'
+import { useMediaQuery } from '../hooks/useMediaQuery'
 import { bookingToCalendarEvent, closureToCalendarEvents, type ScheduleCalendarEvent } from '../lib/scheduleCalendar'
 import type { BookingAdmin, BookingStatus, Closure } from '../lib/types'
 import 'react-big-calendar/lib/css/react-big-calendar.css'
@@ -33,8 +34,13 @@ interface Props {
 }
 
 export function BookingCalendar({ bookings, closures, onSelectBooking, onSelectClosure }: Props) {
-  const [view, setView] = useState<View>('week')
+  const isDesktop = useMediaQuery('(min-width: 768px)')
+  const [view, setView] = useState<View>(() => (isDesktop ? 'week' : 'day'))
   const [date, setDate] = useState(new Date())
+
+  useEffect(() => {
+    setView(isDesktop ? 'week' : 'day')
+  }, [isDesktop])
 
   const events = useMemo(() => {
     const bookingEvents = bookings
@@ -45,23 +51,24 @@ export function BookingCalendar({ bookings, closures, onSelectBooking, onSelectC
   }, [bookings, closures])
 
   return (
-    <div className="booking-calendar rounded-xl border border-gray-200 bg-white p-3 sm:p-4">
-      <Calendar<ScheduleCalendarEvent>
-        localizer={localizer}
-        events={events}
-        view={view}
-        date={date}
-        onView={setView}
-        onNavigate={setDate}
-        views={['week', 'month', 'day']}
-        defaultView="week"
-        step={60}
-        timeslots={1}
-        scrollToTime={new Date(1970, 0, 1, 8, 0)}
-        popup
-        showMultiDayTimes={false}
-        toolbar
-        style={{ height: 560 }}
+    <div className="overflow-x-auto">
+      <div className="booking-calendar rounded-xl border border-gray-200 bg-white p-3 sm:p-4 min-w-0">
+        <Calendar<ScheduleCalendarEvent>
+          localizer={localizer}
+          events={events}
+          view={view}
+          date={date}
+          onView={setView}
+          onNavigate={setDate}
+          views={isDesktop ? ['week', 'month', 'day'] : ['day', 'week', 'month']}
+          defaultView={isDesktop ? 'week' : 'day'}
+          step={60}
+          timeslots={1}
+          scrollToTime={new Date(1970, 0, 1, 8, 0)}
+          popup
+          showMultiDayTimes={false}
+          toolbar
+          style={{ height: isDesktop ? 560 : 420 }}
         onSelectEvent={(event: ScheduleCalendarEvent) => {
           if (event.resource.type === 'booking') {
             onSelectBooking?.(event.resource.booking)
@@ -108,6 +115,7 @@ export function BookingCalendar({ bookings, closures, onSelectBooking, onSelectC
           return `${booking.name} · ${format(event.start, 'h:mm a')} – ${format(event.end, 'h:mm a')}`
         }}
       />
+      </div>
     </div>
   )
 }

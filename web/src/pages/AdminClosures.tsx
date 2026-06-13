@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { AdminPageHeader } from '../components/admin/AdminPageHeader'
 import { adminListClosures, adminCreateClosure, adminUpdateClosure, adminDeleteClosure, ApiError } from '../lib/api'
 import type { Closure } from '../lib/types'
 
@@ -199,15 +200,17 @@ export default function AdminClosures() {
 
   return (
     <div className="p-4 sm:p-8">
-      <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">Closures</h1>
-        <button
-          onClick={() => { setCreating(true); setEditing(null) }}
-          className="bg-blue-600 text-white rounded-lg px-4 py-2 text-sm font-medium hover:bg-blue-700 transition-colors"
-        >
-          + Add closure
-        </button>
-      </div>
+      <AdminPageHeader
+        title="Closures"
+        action={
+          <button
+            onClick={() => { setCreating(true); setEditing(null) }}
+            className="bg-blue-600 text-white rounded-lg px-4 py-2 text-sm font-medium hover:bg-blue-700 transition-colors w-full sm:w-auto"
+          >
+            + Add closure
+          </button>
+        }
+      />
 
       {creating && (
         <div className="mb-6">
@@ -232,8 +235,8 @@ export default function AdminClosures() {
                   onCancel={() => setEditing(null)}
                 />
               ) : (
-                <div className="bg-white rounded-xl border border-gray-200 px-5 py-4 flex items-center justify-between">
-                  <div>
+                <div className="bg-white rounded-xl border border-gray-200 px-5 py-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="min-w-0">
                     <p className="text-sm font-medium text-gray-900">
                       {closure.start_date === closure.end_date
                         ? closure.start_date
@@ -249,7 +252,7 @@ export default function AdminClosures() {
                       <p className="text-xs text-gray-500 mt-0.5">{closure.reason}</p>
                     )}
                   </div>
-                  <div className="flex gap-2">
+                  <div className="flex gap-2 shrink-0">
                     <button
                       onClick={() => { setEditing(closure); setCreating(false) }}
                       className="text-xs text-blue-600 hover:underline"

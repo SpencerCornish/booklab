@@ -123,7 +123,7 @@ export default function AdminUsers() {
         <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">
           Users
         </h2>
-        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+        <div className="bg-white rounded-xl border border-gray-200 overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-gray-200 bg-gray-50 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
