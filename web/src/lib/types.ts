@@ -97,3 +97,14 @@ export interface Closure {
   reason?: string
   created_at: string
 }
+
+export interface AdminUser {
+  id: number
+  username: string
+  created_at: string
+}
+
+export interface AdminUsersResponse {
+  users: AdminUser[]
+  current_username: string
+}

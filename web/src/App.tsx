@@ -10,6 +10,7 @@ import AdminBookings from './pages/AdminBookings'
 import AdminClosures from './pages/AdminClosures'
 import AdminSettings from './pages/AdminSettings'
 import AdminInsights from './pages/AdminInsights'
+import AdminUsers from './pages/AdminUsers'
 import { AdminLayout } from './components/AdminLayout'
 
 export default function App() {
@@ -30,6 +31,7 @@ export default function App() {
           <Route path="bookings" element={<AdminBookings />} />
           <Route path="closures" element={<AdminClosures />} />
           <Route path="insights" element={<AdminInsights />} />
+          <Route path="users" element={<AdminUsers />} />
           <Route path="settings" element={<AdminSettings />} />
         </Route>
 

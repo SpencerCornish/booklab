@@ -9,20 +9,21 @@ import (
 	"net"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"golang.org/x/crypto/bcrypt"
 
-	"github.com/spencercornish/booklab/internal/config"
 	"github.com/spencercornish/booklab/internal/db"
 	emailsvc "github.com/spencercornish/booklab/internal/email"
 )
 
 const (
-	loginRateLimitWindow = 15 * time.Minute
-	loginRateLimitMax    = 10
+	loginRateLimitWindow   = 15 * time.Minute
+	loginRateLimitMax      = 10
+	minAdminPasswordLength = 8
 )
 
 func clientIP(r *http.Request) string {
@@ -88,15 +89,7 @@ func (s *Server) handleAdminLogin(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, r, http.StatusInternalServerError, "login failed", err)
 		return
 	}
-	http.SetCookie(w, &http.Cookie{
-		Name:     "booklab_session",
-		Value:    token,
-		Path:     "/",
-		HttpOnly: true,
-		Secure:   true,
-		SameSite: http.SameSiteLaxMode,
-		MaxAge:   int(config.SessionDuration.Seconds()),
-	})
+	setSessionCookie(w, token)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
@@ -113,6 +106,178 @@ func (s *Server) handleAdminLogout(w http.ResponseWriter, r *http.Request) {
 		SameSite: http.SameSiteLaxMode,
 		MaxAge:   -1,
 	})
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func adminUserToMap(u *db.AdminUserPublic) map[string]any {
+	return map[string]any{
+		"id":         u.ID,
+		"username":   u.Username,
+		"created_at": u.CreatedAt,
+	}
+}
+
+func (s *Server) handleAdminListUsers(w http.ResponseWriter, r *http.Request) {
+	currentUsername, ok := adminUsernameFromContext(r.Context())
+	if !ok {
+		s.writeError(w, r, http.StatusUnauthorized, "authentication required", nil)
+		return
+	}
+
+	users, err := s.queries.ListAdminUsers(r.Context())
+	if err != nil {
+		s.writeError(w, r, http.StatusInternalServerError, "failed to list users", err)
+		return
+	}
+
+	result := make([]map[string]any, len(users))
+	for i, u := range users {
+		result[i] = adminUserToMap(u)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"users":            result,
+		"current_username": currentUsername,
+	})
+}
+
+func (s *Server) handleAdminCreateUser(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+	}
+	if !s.readJSONRequest(w, r, &req) {
+		return
+	}
+
+	username := strings.TrimSpace(req.Username)
+	if username == "" {
+		s.writeError(w, r, http.StatusBadRequest, "username is required", nil)
+		return
+	}
+	if len(req.Password) < minAdminPasswordLength {
+		s.writeError(w, r, http.StatusBadRequest, fmt.Sprintf("password must be at least %d characters", minAdminPasswordLength), nil)
+		return
+	}
+
+	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+	if err != nil {
+		s.writeError(w, r, http.StatusInternalServerError, "failed to create user", err)
+		return
+	}
+
+	user, err := s.queries.CreateAdminUser(r.Context(), username, string(hash))
+	if err != nil {
+		if isUniqueViolation(err) {
+			s.writeError(w, r, http.StatusConflict, "username already exists", err)
+			return
+		}
+		s.writeError(w, r, http.StatusInternalServerError, "failed to create user", err)
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, adminUserToMap(&db.AdminUserPublic{
+		ID:        user.ID,
+		Username:  user.Username,
+		CreatedAt: user.CreatedAt,
+	}))
+}
+
+func (s *Server) handleAdminDeleteUser(w http.ResponseWriter, r *http.Request) {
+	currentUsername, ok := adminUsernameFromContext(r.Context())
+	if !ok {
+		s.writeError(w, r, http.StatusUnauthorized, "authentication required", nil)
+		return
+	}
+
+	target := chi.URLParam(r, "username")
+	if target == "" {
+		s.writeError(w, r, http.StatusBadRequest, "username is required", nil)
+		return
+	}
+	if target == currentUsername {
+		s.writeError(w, r, http.StatusBadRequest, "cannot delete your own account", nil)
+		return
+	}
+
+	if err := s.queries.DeleteAdminUser(r.Context(), target); err != nil {
+		switch {
+		case errors.Is(err, db.ErrLastAdminUser):
+			s.writeError(w, r, http.StatusBadRequest, "cannot delete the last admin user", nil)
+		case errors.Is(err, pgx.ErrNoRows):
+			s.writeError(w, r, http.StatusNotFound, "user not found", err)
+		default:
+			s.writeError(w, r, http.StatusInternalServerError, "failed to delete user", err)
+		}
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) handleAdminChangePassword(w http.ResponseWriter, r *http.Request) {
+	currentUsername, ok := adminUsernameFromContext(r.Context())
+	if !ok {
+		s.writeError(w, r, http.StatusUnauthorized, "authentication required", nil)
+		return
+	}
+
+	var req struct {
+		CurrentPassword string `json:"current_password"`
+		NewPassword     string `json:"new_password"`
+	}
+	if !s.readJSONRequest(w, r, &req) {
+		return
+	}
+
+	if req.CurrentPassword == "" {
+		s.writeError(w, r, http.StatusBadRequest, "current_password is required", nil)
+		return
+	}
+	if len(req.NewPassword) < minAdminPasswordLength {
+		s.writeError(w, r, http.StatusBadRequest, fmt.Sprintf("new_password must be at least %d characters", minAdminPasswordLength), nil)
+		return
+	}
+
+	user, err := s.queries.GetAdminByUsername(r.Context(), currentUsername)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			s.writeError(w, r, http.StatusUnauthorized, "authentication required", err)
+			return
+		}
+		s.writeError(w, r, http.StatusInternalServerError, "failed to change password", err)
+		return
+	}
+
+	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.CurrentPassword)); err != nil {
+		s.writeError(w, r, http.StatusUnauthorized, "current password is incorrect", nil)
+		return
+	}
+
+	hash, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)
+	if err != nil {
+		s.writeError(w, r, http.StatusInternalServerError, "failed to change password", err)
+		return
+	}
+
+	if err := s.queries.UpdateAdminUserPassword(r.Context(), currentUsername, string(hash)); err != nil {
+		s.writeError(w, r, http.StatusInternalServerError, "failed to change password", err)
+		return
+	}
+
+	// Revoke every existing session for this user so a stolen/old cookie cannot
+	// outlive the password change, then issue a fresh session for the caller so
+	// they remain logged in.
+	if err := s.queries.DeleteAdminSessionsByUsername(r.Context(), currentUsername); err != nil {
+		s.writeError(w, r, http.StatusInternalServerError, "failed to change password", err)
+		return
+	}
+	token, err := s.newAdminSession(r.Context(), currentUsername)
+	if err != nil {
+		s.writeError(w, r, http.StatusInternalServerError, "failed to change password", err)
+		return
+	}
+	setSessionCookie(w, token)
+
 	w.WriteHeader(http.StatusNoContent)
 }
 

@@ -5,6 +5,8 @@ import (
 	"errors"
 	"io"
 	"net/http"
+
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
@@ -65,4 +67,9 @@ func (s *Server) readJSONRequest(w http.ResponseWriter, r *http.Request, v any) 
 		return false
 	}
 	return true
+}
+
+func isUniqueViolation(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23505"
 }

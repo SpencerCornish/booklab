@@ -16,6 +16,15 @@ import (
 
 const csrfCookieName = "booklab_csrf"
 
+type contextKey string
+
+const adminUsernameKey contextKey = "adminUsername"
+
+func adminUsernameFromContext(ctx context.Context) (string, bool) {
+	username, ok := ctx.Value(adminUsernameKey).(string)
+	return username, ok
+}
+
 func (s *Server) newAdminSession(ctx context.Context, username string) (sessionID string, err error) {
 	var buf [32]byte
 	if _, err := rand.Read(buf[:]); err != nil {
@@ -27,6 +36,19 @@ func (s *Server) newAdminSession(ctx context.Context, username string) (sessionI
 		return "", err
 	}
 	return id, nil
+}
+
+// setSessionCookie writes the admin session cookie with the standard attributes.
+func setSessionCookie(w http.ResponseWriter, token string) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     config.SessionCookieName,
+		Value:    token,
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   true,
+		SameSite: http.SameSiteLaxMode,
+		MaxAge:   int(config.SessionDuration.Seconds()),
+	})
 }
 
 func (s *Server) requireAdmin(next http.Handler) http.Handler {
@@ -56,7 +78,8 @@ func (s *Server) requireAdmin(next http.Handler) http.Handler {
 			s.writeError(w, r, http.StatusInternalServerError, "session check failed", err)
 			return
 		}
-		next.ServeHTTP(w, r)
+		ctx := context.WithValue(r.Context(), adminUsernameKey, sess.Username)
+		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 

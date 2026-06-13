@@ -1,4 +1,6 @@
 import type {
+  AdminUser,
+  AdminUsersResponse,
   AvailabilityResponse,
   BookingAdmin,
   BookingPublic,
@@ -147,3 +149,23 @@ export const adminUpdateClosure = (
   })
 export const adminDeleteClosure = (id: number) =>
   request<void>(`/admin/closures/${id}`, { method: 'DELETE' })
+
+export const adminListUsers = () => request<AdminUsersResponse>('/admin/users')
+
+export const adminCreateUser = (username: string, password: string) =>
+  request<AdminUser>('/admin/users', {
+    method: 'POST',
+    body: JSON.stringify({ username, password }),
+  })
+
+export const adminDeleteUser = (username: string) =>
+  request<void>(`/admin/users/${encodeURIComponent(username)}`, { method: 'DELETE' })
+
+export const adminChangePassword = (currentPassword: string, newPassword: string) =>
+  request<void>('/admin/users/me/password', {
+    method: 'PUT',
+    body: JSON.stringify({
+      current_password: currentPassword,
+      new_password: newPassword,
+    }),
+  })

@@ -325,6 +325,92 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
 
+  /admin/users:
+    get:
+      tags: [admin]
+      summary: List admin users
+      operationId: adminListUsers
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminUsersResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      tags: [admin]
+      summary: Create admin user
+      operationId: adminCreateUser
+      security:
+        - sessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateAdminUserRequest"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminUser"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "409":
+          description: Username already exists
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /admin/users/me/password:
+    put:
+      tags: [admin]
+      summary: Change own password
+      operationId: adminChangePassword
+      security:
+        - sessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChangePasswordRequest"
+      responses:
+        "204":
+          description: Password updated
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /admin/users/{username}:
+    delete:
+      tags: [admin]
+      summary: Delete admin user
+      operationId: adminDeleteUser
+      security:
+        - sessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/AdminUsername"
+      responses:
+        "204":
+          description: Deleted
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
   /admin/closures:
     get:
       tags: [admin]
@@ -436,6 +522,12 @@ components:
       required: true
       schema:
         type: integer
+    AdminUsername:
+      name: username
+      in: path
+      required: true
+      schema:
+        type: string
 
   responses:
     BadRequest:
@@ -736,6 +828,47 @@ components:
           type: string
         password:
           type: string
+
+    AdminUser:
+      type: object
+      properties:
+        id:
+          type: integer
+        username:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    AdminUsersResponse:
+      type: object
+      properties:
+        users:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminUser"
+        current_username:
+          type: string
+
+    CreateAdminUserRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username:
+          type: string
+        password:
+          type: string
+          minLength: 8
+
+    ChangePasswordRequest:
+      type: object
+      required: [current_password, new_password]
+      properties:
+        current_password:
+          type: string
+        new_password:
+          type: string
+          minLength: 8
 
     Closure:
       type: object

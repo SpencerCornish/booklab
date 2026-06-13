@@ -77,6 +77,12 @@ type AdminUser struct {
 	CreatedAt    time.Time `json:"created_at"`
 }
 
+type AdminUserPublic struct {
+	ID        int32     `json:"id"`
+	Username  string    `json:"username"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
 type AdminSession struct {
 	ID        string    `json:"id"`
 	Username  string    `json:"username"`

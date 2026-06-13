@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -10,6 +11,9 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+// ErrLastAdminUser is returned when a delete would remove the final admin user.
+var ErrLastAdminUser = errors.New("cannot delete the last admin user")
 
 type Queries struct {
 	pool *pgxpool.Pool
@@ -466,6 +470,78 @@ func (q *Queries) CreateAdminUser(ctx context.Context, username, passwordHash st
 		return nil, err
 	}
 	return &u, nil
+}
+
+func (q *Queries) ListAdminUsers(ctx context.Context) ([]*AdminUserPublic, error) {
+	rows, err := q.pool.Query(ctx, `
+		SELECT id, username, created_at
+		FROM admin_users
+		ORDER BY created_at ASC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var users []*AdminUserPublic
+	for rows.Next() {
+		var u AdminUserPublic
+		if err := rows.Scan(&u.ID, &u.Username, &u.CreatedAt); err != nil {
+			return nil, err
+		}
+		users = append(users, &u)
+	}
+	return users, rows.Err()
+}
+
+// DeleteAdminUser removes an admin user, but never the final one. It locks the
+// admin_users rows for the duration of the transaction so concurrent deletes
+// serialize and cannot race past the "last admin" guard. Returns
+// ErrLastAdminUser when only one admin remains, or pgx.ErrNoRows when the
+// target username does not exist.
+func (q *Queries) DeleteAdminUser(ctx context.Context, username string) error {
+	tx, err := q.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	// Lock every admin_users row; a concurrent delete blocks here until we
+	// commit, then re-reads the post-delete count.
+	if _, err := tx.Exec(ctx, `SELECT 1 FROM admin_users FOR UPDATE`); err != nil {
+		return err
+	}
+
+	var count int64
+	if err := tx.QueryRow(ctx, `SELECT COUNT(*)::bigint FROM admin_users`).Scan(&count); err != nil {
+		return err
+	}
+	if count <= 1 {
+		return ErrLastAdminUser
+	}
+
+	tag, err := tx.Exec(ctx, `DELETE FROM admin_users WHERE username = $1`, username)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return pgx.ErrNoRows
+	}
+
+	return tx.Commit(ctx)
+}
+
+func (q *Queries) UpdateAdminUserPassword(ctx context.Context, username, passwordHash string) error {
+	tag, err := q.pool.Exec(ctx, `
+		UPDATE admin_users SET password_hash = $2 WHERE username = $1`,
+		username, passwordHash,
+	)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return pgx.ErrNoRows
+	}
+	return nil
 }
 
 // ----- Admin sessions -----
