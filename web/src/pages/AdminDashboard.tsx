@@ -3,8 +3,8 @@ import { format, isToday, isFuture } from 'date-fns'
 import { BookingCalendar } from '../components/BookingCalendar'
 import { BookingStatusBadge } from '../components/admin/bookingStatus'
 import { ResponsiveDataView } from '../components/admin/ResponsiveDataView'
-import { adminListBookings, adminListClosures } from '../lib/api'
-import type { BookingAdmin, Closure } from '../lib/types'
+import { adminListBookings, adminListClosures, adminGetSettings } from '../lib/api'
+import type { BookingAdmin, Closure, Settings } from '../lib/types'
 
 function BookingSummaryCard({
   booking,
@@ -33,15 +33,17 @@ function BookingSummaryCard({
 export default function AdminDashboard() {
   const [bookings, setBookings] = useState<BookingAdmin[]>([])
   const [closures, setClosures] = useState<Closure[]>([])
+  const [settings, setSettings] = useState<Settings | null>(null)
   const [loading, setLoading] = useState(true)
   const [selectedBooking, setSelectedBooking] = useState<BookingAdmin | null>(null)
   const [selectedClosure, setSelectedClosure] = useState<Closure | null>(null)
 
   useEffect(() => {
-    Promise.all([adminListBookings(), adminListClosures()])
-      .then(([bookingList, closureList]) => {
+    Promise.all([adminListBookings(), adminListClosures(), adminGetSettings()])
+      .then(([bookingList, closureList, settingsData]) => {
         setBookings(bookingList)
         setClosures(closureList)
+        setSettings(settingsData)
       })
       .catch(console.error)
       .finally(() => setLoading(false))
@@ -83,11 +85,87 @@ export default function AdminDashboard() {
         ))}
       </div>
 
+      {needsCharge.length > 0 && (
+        <section className="mb-8">
+          <h2 className="text-sm font-semibold text-amber-600 uppercase tracking-wider mb-3">Needs Charge</h2>
+          <ResponsiveDataView
+            items={needsCharge}
+            keyFn={(b) => b.id}
+            panelClassName="bg-white rounded-xl border border-amber-200"
+            theadClassName="bg-amber-50 border-b border-amber-100"
+            renderCard={(b) => <BookingSummaryCard booking={b} borderClassName="border-amber-200" />}
+            columns={[
+              {
+                header: 'Name',
+                headerClassName: 'text-amber-700',
+                render: (b) => <span className="text-sm font-medium text-gray-900">{b.name}</span>,
+              },
+              {
+                header: 'Date',
+                headerClassName: 'text-amber-700',
+                cellClassName: 'text-sm text-gray-600',
+                render: (b) =>
+                  `${format(new Date(b.start_time), 'MMM d')} · ${format(new Date(b.start_time), 'h:mm a')}–${format(new Date(b.end_time), 'h:mm a')}`,
+              },
+              {
+                header: 'Status',
+                headerClassName: 'text-amber-700',
+                render: (b) => <BookingStatusBadge status={b.status} />,
+              },
+              {
+                header: 'Email',
+                headerClassName: 'text-amber-700',
+                cellClassName: 'text-sm text-gray-500',
+                render: (b) => b.email,
+              },
+            ]}
+          />
+          <p className="text-xs text-gray-400 mt-2">
+            Go to <a href="/admin/bookings" className="text-blue-600 hover:underline">Bookings</a> to charge.
+          </p>
+        </section>
+      )}
+
+      {todayBookings.length > 0 && (
+        <section className="mb-8">
+          <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">Today</h2>
+          <ResponsiveDataView
+            items={todayBookings}
+            keyFn={(b) => b.id}
+            renderCard={(b) => <BookingSummaryCard booking={b} />}
+            columns={[
+              {
+                header: 'Name',
+                render: (b) => <span className="text-sm font-medium text-gray-900">{b.name}</span>,
+              },
+              {
+                header: 'Time',
+                cellClassName: 'text-sm text-gray-600',
+                render: (b) =>
+                  `${format(new Date(b.start_time), 'h:mm a')} – ${format(new Date(b.end_time), 'h:mm a')}`,
+              },
+              {
+                header: 'Status',
+                render: (b) => <BookingStatusBadge status={b.status} />,
+              },
+              {
+                header: 'Email',
+                cellClassName: 'text-sm text-gray-500',
+                render: (b) => b.email,
+              },
+            ]}
+          />
+        </section>
+      )}
+
       <section className="mb-8">
         <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">Schedule</h2>
+        {settings && (
         <BookingCalendar
           bookings={bookings}
           closures={closures}
+          bookableStart={settings.bookable_start}
+          bookableEnd={settings.bookable_end}
           onSelectBooking={(booking) => {
             setSelectedBooking(booking)
             setSelectedClosure(null)
@@ -97,6 +175,7 @@ export default function AdminDashboard() {
             setSelectedBooking(null)
           }}
         />
+        )}
         {selectedBooking && (
           <div className="mt-4 rounded-xl border border-gray-200 bg-white p-4">
             <div className="flex flex-wrap items-start justify-between gap-3">
@@ -146,79 +225,6 @@ export default function AdminDashboard() {
           </div>
         )}
       </section>
-
-      {todayBookings.length > 0 && (
-        <section className="mb-8">
-          <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">Today</h2>
-          <ResponsiveDataView
-            items={todayBookings}
-            keyFn={(b) => b.id}
-            renderCard={(b) => <BookingSummaryCard booking={b} />}
-            columns={[
-              {
-                header: 'Name',
-                render: (b) => <span className="text-sm font-medium text-gray-900">{b.name}</span>,
-              },
-              {
-                header: 'Time',
-                cellClassName: 'text-sm text-gray-600',
-                render: (b) =>
-                  `${format(new Date(b.start_time), 'h:mm a')} – ${format(new Date(b.end_time), 'h:mm a')}`,
-              },
-              {
-                header: 'Status',
-                render: (b) => <BookingStatusBadge status={b.status} />,
-              },
-              {
-                header: 'Email',
-                cellClassName: 'text-sm text-gray-500',
-                render: (b) => b.email,
-              },
-            ]}
-          />
-        </section>
-      )}
-
-      {needsCharge.length > 0 && (
-        <section>
-          <h2 className="text-sm font-semibold text-amber-600 uppercase tracking-wider mb-3">Needs Charge</h2>
-          <ResponsiveDataView
-            items={needsCharge}
-            keyFn={(b) => b.id}
-            panelClassName="bg-white rounded-xl border border-amber-200"
-            theadClassName="bg-amber-50 border-b border-amber-100"
-            renderCard={(b) => <BookingSummaryCard booking={b} borderClassName="border-amber-200" />}
-            columns={[
-              {
-                header: 'Name',
-                headerClassName: 'text-amber-700',
-                render: (b) => <span className="text-sm font-medium text-gray-900">{b.name}</span>,
-              },
-              {
-                header: 'Date',
-                headerClassName: 'text-amber-700',
-                cellClassName: 'text-sm text-gray-600',
-                render: (b) =>
-                  `${format(new Date(b.start_time), 'MMM d')} · ${format(new Date(b.start_time), 'h:mm a')}–${format(new Date(b.end_time), 'h:mm a')}`,
-              },
-              {
-                header: 'Status',
-                headerClassName: 'text-amber-700',
-                render: (b) => <BookingStatusBadge status={b.status} />,
-              },
-              {
-                header: 'Email',
-                headerClassName: 'text-amber-700',
-                cellClassName: 'text-sm text-gray-500',
-                render: (b) => b.email,
-              },
-            ]}
-          />
-          <p className="text-xs text-gray-400 mt-2">
-            Go to <a href="/admin/bookings" className="text-blue-600 hover:underline">Bookings</a> to charge.
-          </p>
-        </section>
-      )}
     </div>
   )
 }

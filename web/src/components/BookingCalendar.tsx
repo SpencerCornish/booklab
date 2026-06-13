@@ -26,14 +26,28 @@ const bookingColors: Record<BookingStatus, { background: string; border: string 
 
 const closureColors = { background: '#e5e7eb', border: '#9ca3af', color: '#374151' }
 
+function bookableTimeDate(time: string): Date {
+  const [hours, minutes] = time.split(':').map(Number)
+  return new Date(1970, 0, 1, hours, minutes, 0, 0)
+}
+
 interface Props {
   bookings: BookingAdmin[]
   closures: Closure[]
+  bookableStart: string
+  bookableEnd: string
   onSelectBooking?: (booking: BookingAdmin) => void
   onSelectClosure?: (closure: Closure) => void
 }
 
-export function BookingCalendar({ bookings, closures, onSelectBooking, onSelectClosure }: Props) {
+export function BookingCalendar({
+  bookings,
+  closures,
+  bookableStart,
+  bookableEnd,
+  onSelectBooking,
+  onSelectClosure,
+}: Props) {
   const isDesktop = useMediaQuery('(min-width: 768px)')
   const [view, setView] = useState<View>(() => (isDesktop ? 'week' : 'day'))
   const [date, setDate] = useState(new Date())
@@ -50,6 +64,9 @@ export function BookingCalendar({ bookings, closures, onSelectBooking, onSelectC
     return [...closureEvents, ...bookingEvents]
   }, [bookings, closures])
 
+  const minTime = useMemo(() => bookableTimeDate(bookableStart), [bookableStart])
+  const maxTime = useMemo(() => bookableTimeDate(bookableEnd), [bookableEnd])
+
   return (
     <div className="overflow-x-auto">
       <div className="booking-calendar rounded-xl border border-gray-200 bg-white p-3 sm:p-4 min-w-0">
@@ -64,7 +81,9 @@ export function BookingCalendar({ bookings, closures, onSelectBooking, onSelectC
           defaultView={isDesktop ? 'week' : 'day'}
           step={60}
           timeslots={1}
-          scrollToTime={new Date(1970, 0, 1, 8, 0)}
+          min={minTime}
+          max={maxTime}
+          scrollToTime={minTime}
           popup
           showMultiDayTimes={false}
           toolbar

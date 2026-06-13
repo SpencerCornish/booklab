@@ -21,6 +21,8 @@ declare module 'react-big-calendar' {
     step?: number
     timeslots?: number
     scrollToTime?: Date
+    min?: Date
+    max?: Date
     popup?: boolean
     showMultiDayTimes?: boolean
     toolbar?: boolean
