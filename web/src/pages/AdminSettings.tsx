@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { adminGetSettings, adminUpdateSettings, ApiError } from '../lib/api'
 import type { Settings } from '../lib/types'
+import { RichTextEditor } from '../components/RichTextEditor'
 
 export default function AdminSettings() {
   const [settings, setSettings] = useState<Settings | null>(null)
@@ -159,11 +160,9 @@ export default function AdminSettings() {
               label="Terms & Conditions content"
               hint="Shown on the public Terms page and linked from the booking form."
             >
-              <textarea
-                rows={10}
+              <RichTextEditor
                 value={(form.terms_content ?? '') as string}
-                onChange={(e) => setForm((prev) => ({ ...prev, terms_content: e.target.value }))}
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y font-mono"
+                onChange={(terms_content) => setForm((prev) => ({ ...prev, terms_content }))}
                 placeholder="Enter your terms and conditions…"
               />
             </Field>
@@ -171,11 +170,9 @@ export default function AdminSettings() {
               label="Privacy Policy content"
               hint="Shown on the public Privacy Policy page and linked from the booking form."
             >
-              <textarea
-                rows={10}
+              <RichTextEditor
                 value={(form.privacy_content ?? '') as string}
-                onChange={(e) => setForm((prev) => ({ ...prev, privacy_content: e.target.value }))}
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y font-mono"
+                onChange={(privacy_content) => setForm((prev) => ({ ...prev, privacy_content }))}
                 placeholder="Enter your privacy policy…"
               />
             </Field>

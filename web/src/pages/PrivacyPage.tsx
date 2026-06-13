@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router'
 import { getPrivacy } from '../lib/api'
 import { Footer } from '../components/Footer'
+import { RichTextContent } from '../components/RichTextContent'
 
 export default function PrivacyPage() {
   const [content, setContent] = useState<string | null>(null)
@@ -32,9 +33,7 @@ export default function PrivacyPage() {
           <p className="text-gray-500">Privacy policy has not been published yet.</p>
         ) : (
           <div className="bg-white rounded-2xl border border-gray-200 p-6">
-            <pre className="whitespace-pre-wrap text-sm text-gray-800 font-sans leading-relaxed">
-              {content}
-            </pre>
+            <RichTextContent content={content} />
           </div>
         )}
 
