@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
 import { format, isToday, isFuture } from 'date-fns'
 import { BookingCalendar } from '../components/BookingCalendar'
-import { adminListBookings } from '../lib/api'
-import type { BookingAdmin } from '../lib/types'
+import { adminListBookings, adminListClosures } from '../lib/api'
+import type { BookingAdmin, Closure } from '../lib/types'
 
 const statusColors: Record<string, string> = {
   confirmed: 'bg-green-100 text-green-700',
@@ -30,12 +30,17 @@ function BookingRow({ booking }: { booking: BookingAdmin }) {
 
 export default function AdminDashboard() {
   const [bookings, setBookings] = useState<BookingAdmin[]>([])
+  const [closures, setClosures] = useState<Closure[]>([])
   const [loading, setLoading] = useState(true)
   const [selectedBooking, setSelectedBooking] = useState<BookingAdmin | null>(null)
+  const [selectedClosure, setSelectedClosure] = useState<Closure | null>(null)
 
   useEffect(() => {
-    adminListBookings()
-      .then(setBookings)
+    Promise.all([adminListBookings(), adminListClosures()])
+      .then(([bookingList, closureList]) => {
+        setBookings(bookingList)
+        setClosures(closureList)
+      })
       .catch(console.error)
       .finally(() => setLoading(false))
   }, [])
@@ -79,7 +84,18 @@ export default function AdminDashboard() {
 
       <section className="mb-8">
         <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">Schedule</h2>
-        <BookingCalendar bookings={bookings} onSelectBooking={setSelectedBooking} />
+        <BookingCalendar
+          bookings={bookings}
+          closures={closures}
+          onSelectBooking={(booking) => {
+            setSelectedBooking(booking)
+            setSelectedClosure(null)
+          }}
+          onSelectClosure={(closure) => {
+            setSelectedClosure(closure)
+            setSelectedBooking(null)
+          }}
+        />
         {selectedBooking && (
           <div className="mt-4 rounded-xl border border-gray-200 bg-white p-4">
             <div className="flex flex-wrap items-start justify-between gap-3">
@@ -100,6 +116,35 @@ export default function AdminDashboard() {
             </p>
             <a href="/admin/bookings" className="inline-block text-sm text-blue-600 hover:underline mt-3">
               View in Bookings →
+            </a>
+          </div>
+        )}
+        {selectedClosure && (
+          <div className="mt-4 rounded-xl border border-gray-300 bg-gray-50 p-4">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <p className="font-semibold text-gray-900">Closure</p>
+                {selectedClosure.reason && (
+                  <p className="text-sm text-gray-600 mt-0.5">{selectedClosure.reason}</p>
+                )}
+              </div>
+              <span className="inline-block px-2 py-0.5 rounded-full text-xs font-medium bg-gray-200 text-gray-700">
+                {selectedClosure.all_day ? 'All day' : 'Partial day'}
+              </span>
+            </div>
+            <p className="text-sm text-gray-600 mt-3">
+              {selectedClosure.start_date === selectedClosure.end_date
+                ? format(new Date(`${selectedClosure.start_date}T12:00:00`), 'EEEE, MMM d')
+                : `${format(new Date(`${selectedClosure.start_date}T12:00:00`), 'MMM d')} – ${format(new Date(`${selectedClosure.end_date}T12:00:00`), 'MMM d')}`}
+              {!selectedClosure.all_day && selectedClosure.start_time && selectedClosure.end_time && (
+                <>
+                  {' '}
+                  · {selectedClosure.start_time}–{selectedClosure.end_time}
+                </>
+              )}
+            </p>
+            <a href="/admin/closures" className="inline-block text-sm text-blue-600 hover:underline mt-3">
+              View in Closures →
             </a>
           </div>
         )}

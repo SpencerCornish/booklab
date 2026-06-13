@@ -1,14 +1,7 @@
 declare module 'react-big-calendar' {
   import type { ComponentType, CSSProperties } from 'react'
 
-  export type View = 'month' | 'week' | 'work_week' | 'day' | 'agenda' | string
-
-  export const Navigate: {
-    PREVIOUS: 'PREV'
-    NEXT: 'NEXT'
-    TODAY: 'TODAY'
-    DATE: 'DATE'
-  }
+  export type View = 'month' | 'week' | 'work_week' | 'day' | 'agenda'
 
   export interface Event {
     title?: string
@@ -24,8 +17,7 @@ declare module 'react-big-calendar' {
     view?: View
     date?: Date
     defaultView?: View
-    views?: View[] | Record<string, boolean | ComponentType<object>>
-    messages?: Record<string, string>
+    views?: View[]
     step?: number
     timeslots?: number
     scrollToTime?: Date
@@ -44,8 +36,6 @@ declare module 'react-big-calendar' {
     props: CalendarProps<TEvent>,
   ) => ReturnType<ComponentType<CalendarProps<TEvent>>>
 
-  export type { CalendarProps }
-
   export function dateFnsLocalizer(config: {
     format: (...args: never[]) => string
     parse: (...args: never[]) => Date
@@ -56,10 +46,3 @@ declare module 'react-big-calendar' {
 }
 
 declare module 'react-big-calendar/lib/css/react-big-calendar.css'
-
-declare module 'react-big-calendar/lib/TimeGrid' {
-  import type { ComponentType } from 'react'
-
-  const TimeGrid: ComponentType<Record<string, unknown>>
-  export default TimeGrid
-}
