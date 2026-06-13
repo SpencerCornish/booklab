@@ -9,12 +9,29 @@ export interface PublicSettings {
   min_hours: number
   max_hours: number
   timezone: string
+  referral_sources: string[]
 }
 
 export interface Settings extends PublicSettings {
   reminder_hours_before: number
   notification_emails: string
   auto_charge_delay_minutes: number
+  terms_content: string
+  privacy_content: string
+}
+
+export interface ReferralSourceCount {
+  source: string
+  count: number
+}
+
+export interface InsightsData {
+  total_bookings: number
+  total_revenue_cents: number
+  unique_customers: number
+  recent_bookings: number
+  bookings_by_status: Record<string, number>
+  referral_sources: ReferralSourceCount[]
 }
 
 export interface TimeSlot {

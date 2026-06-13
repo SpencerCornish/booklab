@@ -65,6 +65,9 @@ type Settings struct {
 	ReminderHoursBefore      int32     `json:"reminder_hours_before"`
 	NotificationEmails       string    `json:"notification_emails"`
 	AutoChargeDelayMinutes   int32     `json:"auto_charge_delay_minutes"`
+	ReferralSources          []string  `json:"referral_sources"`
+	TermsContent             string    `json:"terms_content"`
+	PrivacyContent           string    `json:"privacy_content"`
 }
 
 type AdminUser struct {

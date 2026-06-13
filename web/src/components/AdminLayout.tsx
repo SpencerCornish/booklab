@@ -6,6 +6,7 @@ const navItems = [
   { to: '/admin', label: 'Dashboard', end: true },
   { to: '/admin/bookings', label: 'Bookings' },
   { to: '/admin/closures', label: 'Closures' },
+  { to: '/admin/insights', label: 'Insights' },
   { to: '/admin/settings', label: 'Settings' },
 ]
 

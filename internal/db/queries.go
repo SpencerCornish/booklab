@@ -24,7 +24,7 @@ func New(pool *pgxpool.Pool) *Queries {
 func (q *Queries) GetSettings(ctx context.Context) (*Settings, error) {
 	row := q.pool.QueryRow(ctx, `SELECT id, resource_name, hourly_rate_cents, currency, timezone,
 		bookable_start, bookable_end, min_hours, max_hours, reminder_hours_before, notification_emails,
-		auto_charge_delay_minutes
+		auto_charge_delay_minutes, referral_sources, terms_content, privacy_content
 		FROM settings WHERE id = 1`)
 	return scanSettings(row)
 }
@@ -41,6 +41,9 @@ type UpdateSettingsParams struct {
 	ReminderHoursBefore      *int32
 	NotificationEmails       *string
 	AutoChargeDelayMinutes   *int32
+	ReferralSources          *[]string
+	TermsContent             *string
+	PrivacyContent           *string
 }
 
 func (q *Queries) UpdateSettings(ctx context.Context, p UpdateSettingsParams) (*Settings, error) {
@@ -56,14 +59,19 @@ func (q *Queries) UpdateSettings(ctx context.Context, p UpdateSettingsParams) (*
 			max_hours                   = COALESCE($8, max_hours),
 			reminder_hours_before       = COALESCE($9, reminder_hours_before),
 			notification_emails         = COALESCE($10, notification_emails),
-			auto_charge_delay_minutes   = COALESCE($11, auto_charge_delay_minutes)
+			auto_charge_delay_minutes   = COALESCE($11, auto_charge_delay_minutes),
+			referral_sources            = COALESCE($12, referral_sources),
+			terms_content               = COALESCE($13, terms_content),
+			privacy_content             = COALESCE($14, privacy_content)
 		WHERE id = 1
 		RETURNING id, resource_name, hourly_rate_cents, currency, timezone,
 			bookable_start, bookable_end, min_hours, max_hours, reminder_hours_before,
-			notification_emails, auto_charge_delay_minutes`,
+			notification_emails, auto_charge_delay_minutes, referral_sources,
+			terms_content, privacy_content`,
 		p.ResourceName, p.HourlyRateCents, p.Currency, p.Timezone,
 		p.BookableStart, p.BookableEnd, p.MinHours, p.MaxHours, p.ReminderHoursBefore,
-		p.NotificationEmails, p.AutoChargeDelayMinutes,
+		p.NotificationEmails, p.AutoChargeDelayMinutes, p.ReferralSources,
+		p.TermsContent, p.PrivacyContent,
 	)
 	return scanSettings(row)
 }
@@ -73,10 +81,14 @@ func scanSettings(row pgx.Row) (*Settings, error) {
 	err := row.Scan(
 		&s.ID, &s.ResourceName, &s.HourlyRateCents, &s.Currency, &s.Timezone,
 		&s.BookableStart, &s.BookableEnd, &s.MinHours, &s.MaxHours, &s.ReminderHoursBefore,
-		&s.NotificationEmails, &s.AutoChargeDelayMinutes,
+		&s.NotificationEmails, &s.AutoChargeDelayMinutes, &s.ReferralSources,
+		&s.TermsContent, &s.PrivacyContent,
 	)
 	if err != nil {
 		return nil, err
+	}
+	if s.ReferralSources == nil {
+		s.ReferralSources = []string{}
 	}
 	return &s, nil
 }
@@ -525,4 +537,90 @@ func (q *Queries) CountRecentFailedLoginAttemptsByUsername(ctx context.Context, 
 		return 0, err
 	}
 	return n, nil
+}
+
+// ----- Insights -----
+
+type ReferralSourceCount struct {
+	Source string `json:"source"`
+	Count  int64  `json:"count"`
+}
+
+type BookingInsights struct {
+	TotalBookings     int64                 `json:"total_bookings"`
+	TotalRevenueCents int64                 `json:"total_revenue_cents"`
+	UniqueCustomers   int64                 `json:"unique_customers"`
+	RecentBookings    int64                 `json:"recent_bookings"`
+	BookingsByStatus  map[string]int64      `json:"bookings_by_status"`
+	ReferralSources   []ReferralSourceCount `json:"referral_sources"`
+}
+
+func (q *Queries) GetBookingInsights(ctx context.Context) (*BookingInsights, error) {
+	insights := &BookingInsights{
+		BookingsByStatus: make(map[string]int64),
+		ReferralSources:  []ReferralSourceCount{},
+	}
+
+	if err := q.pool.QueryRow(ctx, `SELECT COUNT(*) FROM bookings`).Scan(&insights.TotalBookings); err != nil {
+		return nil, err
+	}
+
+	if err := q.pool.QueryRow(ctx, `
+		SELECT COALESCE(SUM(amount_cents), 0)::bigint FROM bookings
+		WHERE status = 'charged' AND amount_cents IS NOT NULL`,
+	).Scan(&insights.TotalRevenueCents); err != nil {
+		return nil, err
+	}
+
+	if err := q.pool.QueryRow(ctx, `
+		SELECT COUNT(DISTINCT email) FROM bookings WHERE status != 'cancelled'`,
+	).Scan(&insights.UniqueCustomers); err != nil {
+		return nil, err
+	}
+
+	if err := q.pool.QueryRow(ctx, `
+		SELECT COUNT(*) FROM bookings WHERE created_at >= NOW() - INTERVAL '30 days'`,
+	).Scan(&insights.RecentBookings); err != nil {
+		return nil, err
+	}
+
+	rows, err := q.pool.Query(ctx, `SELECT status::text, COUNT(*)::bigint FROM bookings GROUP BY status`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var status string
+		var count int64
+		if err := rows.Scan(&status, &count); err != nil {
+			return nil, err
+		}
+		insights.BookingsByStatus[status] = count
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	refRows, err := q.pool.Query(ctx, `
+		SELECT metadata->>'ReferralSource' AS source, COUNT(*)::bigint AS count
+		FROM bookings
+		WHERE metadata->>'ReferralSource' IS NOT NULL AND metadata->>'ReferralSource' != ''
+		GROUP BY source
+		ORDER BY count DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer refRows.Close()
+	for refRows.Next() {
+		var rc ReferralSourceCount
+		if err := refRows.Scan(&rc.Source, &rc.Count); err != nil {
+			return nil, err
+		}
+		insights.ReferralSources = append(insights.ReferralSources, rc)
+	}
+	if err := refRows.Err(); err != nil {
+		return nil, err
+	}
+
+	return insights, nil
 }

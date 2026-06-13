@@ -3,6 +3,7 @@ import { useParams, Link } from 'react-router'
 import { format } from 'date-fns'
 import { getBookingByToken, cancelBooking, ApiError } from '../lib/api'
 import type { BookingPublic } from '../lib/types'
+import { Footer } from '../components/Footer'
 
 export default function CancelPage() {
   const { token } = useParams<{ token: string }>()
@@ -35,28 +36,35 @@ export default function CancelPage() {
 
   if (loadError) {
     return (
-      <div className="min-h-screen flex items-center justify-center px-4">
-        <div className="text-center">
-          <p className="text-gray-500">{loadError}</p>
-          <Link to="/" className="mt-4 inline-block text-blue-600 text-sm hover:underline">
-            Make a new booking
-          </Link>
+      <div className="min-h-screen bg-gray-50 flex flex-col">
+        <div className="flex-1 flex items-center justify-center px-4">
+          <div className="text-center">
+            <p className="text-gray-500">{loadError}</p>
+            <Link to="/" className="mt-4 inline-block text-blue-600 text-sm hover:underline">
+              Make a new booking
+            </Link>
+          </div>
         </div>
+        <Footer />
       </div>
     )
   }
 
   if (!booking) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" />
+      <div className="min-h-screen bg-gray-50 flex flex-col">
+        <div className="flex-1 flex items-center justify-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" />
+        </div>
+        <Footer />
       </div>
     )
   }
 
   if (cancelled || booking.status === 'cancelled') {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center px-4">
+      <div className="min-h-screen bg-gray-50 flex flex-col">
+        <div className="flex-1 flex items-center justify-center px-4">
         <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-8 max-w-md w-full text-center">
           <div className="w-14 h-14 rounded-full bg-gray-100 flex items-center justify-center mx-auto mb-4">
             <svg className="w-7 h-7 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -69,23 +77,29 @@ export default function CancelPage() {
             Make a new booking
           </Link>
         </div>
+        </div>
+        <Footer />
       </div>
     )
   }
 
   if (booking.status !== 'confirmed') {
     return (
-      <div className="min-h-screen flex items-center justify-center px-4">
-        <div className="text-center">
-          <p className="text-gray-500">This booking cannot be cancelled (status: {booking.status}).</p>
-          <Link to="/" className="mt-4 inline-block text-blue-600 text-sm hover:underline">Home</Link>
+      <div className="min-h-screen bg-gray-50 flex flex-col">
+        <div className="flex-1 flex items-center justify-center px-4">
+          <div className="text-center">
+            <p className="text-gray-500">This booking cannot be cancelled (status: {booking.status}).</p>
+            <Link to="/" className="mt-4 inline-block text-blue-600 text-sm hover:underline">Home</Link>
+          </div>
         </div>
+        <Footer />
       </div>
     )
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 flex items-center justify-center px-4">
+    <div className="min-h-screen bg-gray-50 flex flex-col">
+      <div className="flex-1 flex items-center justify-center px-4">
       <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-8 max-w-md w-full">
         <h1 className="text-xl font-bold text-gray-900 mb-1">Cancel Booking</h1>
         <p className="text-sm text-gray-500 mb-6">Are you sure you want to cancel?</p>
@@ -131,6 +145,8 @@ export default function CancelPage() {
           </Link>
         </div>
       </div>
+      </div>
+      <Footer />
     </div>
   )
 }

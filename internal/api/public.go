@@ -29,6 +29,29 @@ func (s *Server) handleGetPublicSettings(w http.ResponseWriter, r *http.Request)
 		"min_hours":         settings.MinHours,
 		"max_hours":         settings.MaxHours,
 		"timezone":          settings.Timezone,
+		"referral_sources":  settings.ReferralSources,
+	})
+}
+
+func (s *Server) handleGetTerms(w http.ResponseWriter, r *http.Request) {
+	settings, err := s.queries.GetSettings(r.Context())
+	if err != nil {
+		s.writeError(w, r, http.StatusInternalServerError, "failed to load terms", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"content": settings.TermsContent,
+	})
+}
+
+func (s *Server) handleGetPrivacy(w http.ResponseWriter, r *http.Request) {
+	settings, err := s.queries.GetSettings(r.Context())
+	if err != nil {
+		s.writeError(w, r, http.StatusInternalServerError, "failed to load privacy policy", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"content": settings.PrivacyContent,
 	})
 }
 

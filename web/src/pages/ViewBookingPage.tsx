@@ -3,6 +3,7 @@ import { useParams, Link } from 'react-router'
 import { format } from 'date-fns'
 import { getBookingByToken } from '../lib/api'
 import type { BookingPublic } from '../lib/types'
+import { Footer } from '../components/Footer'
 
 const statusBadge: Record<string, string> = {
   confirmed: 'bg-green-100 text-green-700',
@@ -25,27 +26,34 @@ export default function ViewBookingPage() {
 
   if (error) {
     return (
-      <div className="min-h-screen flex items-center justify-center px-4">
-        <div className="text-center">
-          <p className="text-gray-500">{error}</p>
-          <Link to="/" className="mt-4 inline-block text-blue-600 text-sm hover:underline">
-            Make a new booking
-          </Link>
+      <div className="min-h-screen bg-gray-50 flex flex-col">
+        <div className="flex-1 flex items-center justify-center px-4">
+          <div className="text-center">
+            <p className="text-gray-500">{error}</p>
+            <Link to="/" className="mt-4 inline-block text-blue-600 text-sm hover:underline">
+              Make a new booking
+            </Link>
+          </div>
         </div>
+        <Footer />
       </div>
     )
   }
 
   if (!booking) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" />
+      <div className="min-h-screen bg-gray-50 flex flex-col">
+        <div className="flex-1 flex items-center justify-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" />
+        </div>
+        <Footer />
       </div>
     )
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 flex items-center justify-center px-4">
+    <div className="min-h-screen bg-gray-50 flex flex-col">
+      <div className="flex-1 flex items-center justify-center px-4">
       <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-8 max-w-md w-full">
         <h1 className="text-xl font-bold text-gray-900 mb-1">Your Booking</h1>
         <span
@@ -89,6 +97,8 @@ export default function ViewBookingPage() {
           Make another booking
         </Link>
       </div>
+      </div>
+      <Footer />
     </div>
   )
 }

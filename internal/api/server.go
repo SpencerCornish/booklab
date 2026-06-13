@@ -80,6 +80,8 @@ func (s *Server) Handler() http.Handler {
 	r.Route("/api", func(r chi.Router) {
 		// Public
 		r.Get("/settings/public", s.handleGetPublicSettings)
+		r.Get("/terms", s.handleGetTerms)
+		r.Get("/privacy", s.handleGetPrivacy)
 		r.Get("/availability", s.handleGetAvailability)
 		r.Post("/bookings", s.handleCreateBooking)
 		r.Get("/bookings/{token}", s.handleGetBooking)
@@ -97,6 +99,7 @@ func (s *Server) Handler() http.Handler {
 			r.Post("/admin/bookings/{id}/charge", s.handleAdminChargeBooking)
 			r.Get("/admin/settings", s.handleAdminGetSettings)
 			r.Put("/admin/settings", s.handleAdminUpdateSettings)
+			r.Get("/admin/insights", s.handleAdminGetInsights)
 			r.Get("/admin/closures", s.handleAdminListClosures)
 			r.Post("/admin/closures", s.handleAdminCreateClosure)
 			r.Put("/admin/closures/{id}", s.handleAdminUpdateClosure)

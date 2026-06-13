@@ -117,6 +117,21 @@ export default function AdminSettings() {
         </section>
 
         <section>
+          <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">Marketing</h2>
+          <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-4">
+            <Field
+              label="Referral sources"
+              hint="Shown as an optional question on the booking page. Leave empty to hide the question. Include “Other” to allow a free-text response."
+            >
+              <ReferralSourcesEditor
+                sources={(form.referral_sources ?? []) as string[]}
+                onChange={(referral_sources) => setForm((prev) => ({ ...prev, referral_sources }))}
+              />
+            </Field>
+          </div>
+        </section>
+
+        <section>
           <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">Emails</h2>
           <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-4">
             <Field label="Send reminder N hours before" hint="0 to disable">
@@ -132,6 +147,36 @@ export default function AdminSettings() {
                 onChange={(e) => setForm((prev) => ({ ...prev, notification_emails: e.target.value }))}
                 className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
                 placeholder="staff@example.com, owner@example.com"
+              />
+            </Field>
+          </div>
+        </section>
+
+        <section>
+          <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">Legal</h2>
+          <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-4">
+            <Field
+              label="Terms & Conditions content"
+              hint="Shown on the public Terms page and linked from the booking form."
+            >
+              <textarea
+                rows={10}
+                value={(form.terms_content ?? '') as string}
+                onChange={(e) => setForm((prev) => ({ ...prev, terms_content: e.target.value }))}
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y font-mono"
+                placeholder="Enter your terms and conditions…"
+              />
+            </Field>
+            <Field
+              label="Privacy Policy content"
+              hint="Shown on the public Privacy Policy page and linked from the booking form."
+            >
+              <textarea
+                rows={10}
+                value={(form.privacy_content ?? '') as string}
+                onChange={(e) => setForm((prev) => ({ ...prev, privacy_content: e.target.value }))}
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y font-mono"
+                placeholder="Enter your privacy policy…"
               />
             </Field>
           </div>
@@ -173,6 +218,103 @@ function Field({
       <label className="block text-sm font-medium text-gray-700 mb-1">{label}</label>
       {children}
       {hint && <p className="text-xs text-gray-400 mt-1">{hint}</p>}
+    </div>
+  )
+}
+
+function ReferralSourcesEditor({
+  sources,
+  onChange,
+}: {
+  sources: string[]
+  onChange: (sources: string[]) => void
+}) {
+  const [newSource, setNewSource] = useState('')
+
+  const addSource = () => {
+    const trimmed = newSource.trim()
+    if (!trimmed || sources.includes(trimmed)) return
+    onChange([...sources, trimmed])
+    setNewSource('')
+  }
+
+  const removeSource = (index: number) => {
+    onChange(sources.filter((_, i) => i !== index))
+  }
+
+  const moveSource = (index: number, direction: -1 | 1) => {
+    const next = index + direction
+    if (next < 0 || next >= sources.length) return
+    const updated = [...sources]
+    ;[updated[index], updated[next]] = [updated[next], updated[index]]
+    onChange(updated)
+  }
+
+  return (
+    <div className="space-y-3">
+      {sources.length === 0 ? (
+        <p className="text-sm text-gray-400">No referral sources configured.</p>
+      ) : (
+        <ul className="space-y-2">
+          {sources.map((source, index) => (
+            <li
+              key={`${source}-${index}`}
+              className="flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 bg-gray-50"
+            >
+              <span className="flex-1 text-sm text-gray-800">{source}</span>
+              <button
+                type="button"
+                onClick={() => moveSource(index, -1)}
+                disabled={index === 0}
+                className="text-xs text-gray-500 hover:text-gray-800 disabled:opacity-30 px-1"
+                aria-label="Move up"
+              >
+                ↑
+              </button>
+              <button
+                type="button"
+                onClick={() => moveSource(index, 1)}
+                disabled={index === sources.length - 1}
+                className="text-xs text-gray-500 hover:text-gray-800 disabled:opacity-30 px-1"
+                aria-label="Move down"
+              >
+                ↓
+              </button>
+              <button
+                type="button"
+                onClick={() => removeSource(index)}
+                className="text-xs text-red-600 hover:text-red-800 px-1"
+                aria-label="Remove"
+              >
+                Remove
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <div className="flex gap-2">
+        <input
+          type="text"
+          value={newSource}
+          onChange={(e) => setNewSource(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault()
+              addSource()
+            }
+          }}
+          className={inputClass}
+          placeholder="Add a source…"
+        />
+        <button
+          type="button"
+          onClick={addSource}
+          disabled={!newSource.trim()}
+          className="shrink-0 rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+        >
+          Add
+        </button>
+      </div>
     </div>
   )
 }

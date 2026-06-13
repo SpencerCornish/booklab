@@ -334,6 +334,15 @@ func (s *Server) handleAdminChargeBooking(w http.ResponseWriter, r *http.Request
 	writeJSON(w, http.StatusOK, bookingToAdmin(updated))
 }
 
+func (s *Server) handleAdminGetInsights(w http.ResponseWriter, r *http.Request) {
+	insights, err := s.queries.GetBookingInsights(r.Context())
+	if err != nil {
+		s.writeError(w, r, http.StatusInternalServerError, "failed to load insights", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, insights)
+}
+
 func (s *Server) handleAdminGetSettings(w http.ResponseWriter, r *http.Request) {
 	settings, err := s.queries.GetSettings(r.Context())
 	if err != nil {
@@ -354,8 +363,11 @@ func (s *Server) handleAdminUpdateSettings(w http.ResponseWriter, r *http.Reques
 		MinHours                 *int32  `json:"min_hours"`
 		MaxHours                 *int32  `json:"max_hours"`
 		ReminderHoursBefore      *int32  `json:"reminder_hours_before"`
-		NotificationEmails       *string `json:"notification_emails"`
-		AutoChargeDelayMinutes   *int32  `json:"auto_charge_delay_minutes"`
+		NotificationEmails       *string   `json:"notification_emails"`
+		AutoChargeDelayMinutes   *int32    `json:"auto_charge_delay_minutes"`
+		ReferralSources          *[]string `json:"referral_sources"`
+		TermsContent             *string   `json:"terms_content"`
+		PrivacyContent           *string   `json:"privacy_content"`
 	}
 	if !s.readJSONRequest(w, r, &req) {
 		return
@@ -371,6 +383,9 @@ func (s *Server) handleAdminUpdateSettings(w http.ResponseWriter, r *http.Reques
 		ReminderHoursBefore:      req.ReminderHoursBefore,
 		NotificationEmails:       req.NotificationEmails,
 		AutoChargeDelayMinutes:   req.AutoChargeDelayMinutes,
+		ReferralSources:          req.ReferralSources,
+		TermsContent:             req.TermsContent,
+		PrivacyContent:           req.PrivacyContent,
 	}
 
 	if req.BookableStart != nil {
@@ -515,6 +530,9 @@ func settingsToMap(s *db.Settings) map[string]any {
 		"reminder_hours_before":      s.ReminderHoursBefore,
 		"notification_emails":        s.NotificationEmails,
 		"auto_charge_delay_minutes":  s.AutoChargeDelayMinutes,
+		"referral_sources":           s.ReferralSources,
+		"terms_content":              s.TermsContent,
+		"privacy_content":            s.PrivacyContent,
 	}
 }
 

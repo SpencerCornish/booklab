@@ -4,6 +4,7 @@ import type {
   BookingPublic,
   Closure,
   CreateBookingResponse,
+  InsightsData,
   PublicSettings,
   Settings,
 } from './types'
@@ -48,6 +49,8 @@ export class ApiError extends Error {
 
 // Public
 export const getPublicSettings = () => request<PublicSettings>('/settings/public')
+export const getTerms = () => request<{ content: string }>('/terms')
+export const getPrivacy = () => request<{ content: string }>('/privacy')
 export const getAvailability = (date: string) =>
   request<AvailabilityResponse>(`/availability?date=${date}`)
 
@@ -111,6 +114,8 @@ export const adminUpdateSettings = (body: Partial<Settings>) =>
     method: 'PUT',
     body: JSON.stringify(body),
   })
+
+export const adminGetInsights = () => request<InsightsData>('/admin/insights')
 
 export const adminListClosures = () => request<Closure[]>('/admin/closures')
 export const adminCreateClosure = (body: {

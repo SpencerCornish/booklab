@@ -4,6 +4,7 @@ import { loadStripe } from '@stripe/stripe-js'
 import { Elements, CardElement, useStripe, useElements } from '@stripe/react-stripe-js'
 import { DatePicker } from '../components/DatePicker'
 import { TimeSlotPicker } from '../components/TimeSlotPicker'
+import { Footer } from '../components/Footer'
 import {
   getPublicSettings,
   getAvailability,
@@ -33,7 +34,7 @@ export default function BookingPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gray-50 flex flex-col">
       <header className="bg-white border-b border-gray-200 px-4 py-5">
         <div className="max-w-2xl mx-auto">
           <h1 className="text-2xl font-bold text-gray-900">Book {settings.resource_name}</h1>
@@ -43,9 +44,13 @@ export default function BookingPage() {
         </div>
       </header>
 
-      <Elements stripe={stripePromise}>
-        <BookingForm settings={settings} />
-      </Elements>
+      <div className="flex-1">
+        <Elements stripe={stripePromise}>
+          <BookingForm settings={settings} />
+        </Elements>
+      </div>
+
+      <Footer />
     </div>
   )
 }
@@ -65,6 +70,9 @@ function BookingForm({ settings }: { settings: PublicSettings }) {
   const [email, setEmail] = useState('')
   const [phone, setPhone] = useState('')
   const [staffNotes, setStaffNotes] = useState('')
+  const [referralSource, setReferralSource] = useState('')
+  const [referralSourceOther, setReferralSourceOther] = useState('')
+  const [acceptedTerms, setAcceptedTerms] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<BookingPublic | null>(null)
@@ -96,6 +104,12 @@ function BookingForm({ settings }: { settings: PublicSettings }) {
       const metadata: Record<string, string> = {}
       if (phone) metadata['Phone'] = phone
       if (staffNotes) metadata['Notes for staff'] = staffNotes
+      if (referralSource) {
+        metadata['ReferralSource'] = referralSource
+        if (referralSource.toLowerCase() === 'other' && referralSourceOther.trim()) {
+          metadata['ReferralSourceOther'] = referralSourceOther.trim()
+        }
+      }
 
       const { booking, setup_intent_client_secret } = await createBooking({
         name,
@@ -264,6 +278,40 @@ function BookingForm({ settings }: { settings: PublicSettings }) {
               />
             </div>
 
+            {settings.referral_sources.length > 0 && (
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  How did you hear about us? <span className="text-gray-400 font-normal">(optional)</span>
+                </label>
+                <select
+                  value={referralSource}
+                  onChange={(e) => {
+                    setReferralSource(e.target.value)
+                    if (e.target.value.toLowerCase() !== 'other') {
+                      setReferralSourceOther('')
+                    }
+                  }}
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                >
+                  <option value="">Select one…</option>
+                  {settings.referral_sources.map((source) => (
+                    <option key={source} value={source}>
+                      {source}
+                    </option>
+                  ))}
+                </select>
+                {referralSource.toLowerCase() === 'other' && (
+                  <input
+                    type="text"
+                    value={referralSourceOther}
+                    onChange={(e) => setReferralSourceOther(e.target.value)}
+                    className="w-full mt-2 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="Please tell us more…"
+                  />
+                )}
+              </div>
+            )}
+
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Card</label>
               <div className="rounded-lg border border-gray-300 px-3 py-3">
@@ -286,9 +334,39 @@ function BookingForm({ settings }: { settings: PublicSettings }) {
               </div>
             )}
 
+            <label className="flex items-start gap-2 text-sm text-gray-700">
+              <input
+                type="checkbox"
+                required
+                checked={acceptedTerms}
+                onChange={(e) => setAcceptedTerms(e.target.checked)}
+                className="mt-0.5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+              />
+              <span>
+                I accept the{' '}
+                <a
+                  href="/terms"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-blue-600 hover:underline"
+                >
+                  Terms &amp; Conditions
+                </a>
+                {' & '}
+                <a
+                  href="/privacy"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-blue-600 hover:underline"
+                >
+                  Privacy Policy
+                </a>
+              </span>
+            </label>
+
             <button
               type="submit"
-              disabled={submitting || !stripe}
+              disabled={submitting || !stripe || !acceptedTerms}
               className="w-full bg-blue-600 text-white rounded-lg py-2.5 font-medium text-sm hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
               {submitting ? 'Confirming…' : 'Confirm Booking'}
