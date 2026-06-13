@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { format, isToday, isFuture } from 'date-fns'
+import { BookingCalendar } from '../components/BookingCalendar'
 import { adminListBookings } from '../lib/api'
 import type { BookingAdmin } from '../lib/types'
 
@@ -30,6 +31,7 @@ function BookingRow({ booking }: { booking: BookingAdmin }) {
 export default function AdminDashboard() {
   const [bookings, setBookings] = useState<BookingAdmin[]>([])
   const [loading, setLoading] = useState(true)
+  const [selectedBooking, setSelectedBooking] = useState<BookingAdmin | null>(null)
 
   useEffect(() => {
     adminListBookings()
@@ -74,6 +76,34 @@ export default function AdminDashboard() {
           </div>
         ))}
       </div>
+
+      <section className="mb-8">
+        <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">Schedule</h2>
+        <BookingCalendar bookings={bookings} onSelectBooking={setSelectedBooking} />
+        {selectedBooking && (
+          <div className="mt-4 rounded-xl border border-gray-200 bg-white p-4">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <p className="font-semibold text-gray-900">{selectedBooking.name}</p>
+                <p className="text-sm text-gray-500 mt-0.5">{selectedBooking.email}</p>
+              </div>
+              <span
+                className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium capitalize ${statusColors[selectedBooking.status]}`}
+              >
+                {selectedBooking.status}
+              </span>
+            </div>
+            <p className="text-sm text-gray-600 mt-3">
+              {format(new Date(selectedBooking.start_time), 'EEEE, MMM d')} ·{' '}
+              {format(new Date(selectedBooking.start_time), 'h:mm a')} –{' '}
+              {format(new Date(selectedBooking.end_time), 'h:mm a')}
+            </p>
+            <a href="/admin/bookings" className="inline-block text-sm text-blue-600 hover:underline mt-3">
+              View in Bookings →
+            </a>
+          </div>
+        )}
+      </section>
 
       {/* Today's bookings */}
       {todayBookings.length > 0 && (
