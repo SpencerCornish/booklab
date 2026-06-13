@@ -42,11 +42,14 @@ type Booking struct {
 }
 
 type Closure struct {
-	ID        int32     `json:"id"`
-	StartDate time.Time `json:"start_date"`
-	EndDate   time.Time `json:"end_date"`
-	Reason    *string   `json:"reason"`
-	CreatedAt time.Time `json:"created_at"`
+	ID        int32      `json:"id"`
+	StartDate time.Time  `json:"start_date"`
+	EndDate   time.Time  `json:"end_date"`
+	AllDay    bool       `json:"all_day"`
+	StartTime *time.Time `json:"start_time"`
+	EndTime   *time.Time `json:"end_time"`
+	Reason    *string    `json:"reason"`
+	CreatedAt time.Time  `json:"created_at"`
 }
 
 type Settings struct {

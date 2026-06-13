@@ -415,24 +415,26 @@ func (s *Server) handleAdminCreateClosure(w http.ResponseWriter, r *http.Request
 	var req struct {
 		StartDate string  `json:"start_date"`
 		EndDate   string  `json:"end_date"`
+		AllDay    *bool   `json:"all_day"`
+		StartTime *string `json:"start_time"`
+		EndTime   *string `json:"end_time"`
 		Reason    *string `json:"reason"`
 	}
 	if !s.readJSONRequest(w, r, &req) {
 		return
 	}
 
-	start, err := time.Parse("2006-01-02", req.StartDate)
-	if err != nil {
-		s.writeError(w, r, http.StatusBadRequest, "invalid start_date (YYYY-MM-DD)", err)
+	start, end, allDay, startTime, endTime, badReq, err := parseClosureUpsert(req.StartDate, req.EndDate, req.AllDay, req.StartTime, req.EndTime)
+	if badReq != "" {
+		s.writeError(w, r, http.StatusBadRequest, badReq, err)
 		return
 	}
-	end, err := time.Parse("2006-01-02", req.EndDate)
 	if err != nil {
-		s.writeError(w, r, http.StatusBadRequest, "invalid end_date (YYYY-MM-DD)", err)
+		s.writeError(w, r, http.StatusBadRequest, "invalid closure dates", err)
 		return
 	}
 
-	closure, err := s.queries.CreateClosure(r.Context(), start, end, req.Reason)
+	closure, err := s.queries.CreateClosure(r.Context(), start, end, allDay, startTime, endTime, req.Reason)
 	if err != nil {
 		s.writeError(w, r, http.StatusInternalServerError, "failed to create closure", err)
 		return
@@ -450,24 +452,26 @@ func (s *Server) handleAdminUpdateClosure(w http.ResponseWriter, r *http.Request
 	var req struct {
 		StartDate string  `json:"start_date"`
 		EndDate   string  `json:"end_date"`
+		AllDay    *bool   `json:"all_day"`
+		StartTime *string `json:"start_time"`
+		EndTime   *string `json:"end_time"`
 		Reason    *string `json:"reason"`
 	}
 	if !s.readJSONRequest(w, r, &req) {
 		return
 	}
 
-	start, err := time.Parse("2006-01-02", req.StartDate)
-	if err != nil {
-		s.writeError(w, r, http.StatusBadRequest, "invalid start_date", err)
+	start, end, allDay, startTime, endTime, badReq, err := parseClosureUpsert(req.StartDate, req.EndDate, req.AllDay, req.StartTime, req.EndTime)
+	if badReq != "" {
+		s.writeError(w, r, http.StatusBadRequest, badReq, err)
 		return
 	}
-	end, err := time.Parse("2006-01-02", req.EndDate)
 	if err != nil {
-		s.writeError(w, r, http.StatusBadRequest, "invalid end_date", err)
+		s.writeError(w, r, http.StatusBadRequest, "invalid closure dates", err)
 		return
 	}
 
-	closure, err := s.queries.UpdateClosure(r.Context(), id, start, end, req.Reason)
+	closure, err := s.queries.UpdateClosure(r.Context(), id, start, end, allDay, startTime, endTime, req.Reason)
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			s.writeError(w, r, http.StatusNotFound, "closure not found", err)
@@ -515,11 +519,64 @@ func settingsToMap(s *db.Settings) map[string]any {
 }
 
 func closureToMap(c *db.Closure) map[string]any {
-	return map[string]any{
+	m := map[string]any{
 		"id":         c.ID,
 		"start_date": c.StartDate.Format("2006-01-02"),
 		"end_date":   c.EndDate.Format("2006-01-02"),
+		"all_day":    c.AllDay,
 		"reason":     c.Reason,
 		"created_at": c.CreatedAt,
 	}
+	if c.StartTime != nil {
+		m["start_time"] = c.StartTime.Format("15:04")
+	} else {
+		m["start_time"] = nil
+	}
+	if c.EndTime != nil {
+		m["end_time"] = c.EndTime.Format("15:04")
+	} else {
+		m["end_time"] = nil
+	}
+	return m
+}
+
+func parseClosureUpsert(startDate, endDate string, allDay *bool, startTimeStr, endTimeStr *string) (start, end time.Time, allDayOut bool, startTime, endTime *time.Time, badRequest string, err error) {
+	allDayOut = true
+	if allDay != nil {
+		allDayOut = *allDay
+	}
+
+	start, err = time.Parse("2006-01-02", startDate)
+	if err != nil {
+		return time.Time{}, time.Time{}, false, nil, nil, "invalid start_date (YYYY-MM-DD)", err
+	}
+	end, err = time.Parse("2006-01-02", endDate)
+	if err != nil {
+		return time.Time{}, time.Time{}, false, nil, nil, "invalid end_date (YYYY-MM-DD)", err
+	}
+	if end.Before(start) {
+		return time.Time{}, time.Time{}, false, nil, nil, "end_date must be on or after start_date", nil
+	}
+
+	if allDayOut {
+		return start, end, true, nil, nil, "", nil
+	}
+
+	if startTimeStr == nil || *startTimeStr == "" || endTimeStr == nil || *endTimeStr == "" {
+		return time.Time{}, time.Time{}, false, nil, nil, "start_time and end_time are required when all_day is false", nil
+	}
+
+	st, err := time.Parse("15:04", *startTimeStr)
+	if err != nil {
+		return time.Time{}, time.Time{}, false, nil, nil, "invalid start_time (HH:MM)", err
+	}
+	et, err := time.Parse("15:04", *endTimeStr)
+	if err != nil {
+		return time.Time{}, time.Time{}, false, nil, nil, "invalid end_time (HH:MM)", err
+	}
+	if !et.After(st) {
+		return time.Time{}, time.Time{}, false, nil, nil, "end_time must be after start_time", nil
+	}
+
+	return start, end, false, &st, &et, "", nil
 }

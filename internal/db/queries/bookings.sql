@@ -26,7 +26,8 @@ ORDER BY start_time;
 SELECT * FROM bookings
 WHERE reminder_sent = FALSE
   AND status = 'confirmed'
-  AND start_time BETWEEN NOW() AND NOW() + ($1 || ' hours')::interval;
+  AND start_time BETWEEN NOW() AND NOW() + ($1 || ' hours')::interval
+  AND start_time - created_at >= ($1 || ' hours')::interval;
 
 -- name: UpdateBookingStatus :one
 UPDATE bookings SET status = $2 WHERE id = $1 RETURNING *;

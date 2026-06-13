@@ -5,10 +5,20 @@ import type { Closure } from '../lib/types'
 interface ClosureForm {
   start_date: string
   end_date: string
+  all_day: boolean
+  start_time: string
+  end_time: string
   reason: string
 }
 
-const emptyForm: ClosureForm = { start_date: '', end_date: '', reason: '' }
+const emptyForm: ClosureForm = {
+  start_date: '',
+  end_date: '',
+  all_day: true,
+  start_time: '',
+  end_time: '',
+  reason: '',
+}
 
 function ClosureFormPanel({
   initial,
@@ -21,7 +31,14 @@ function ClosureFormPanel({
 }) {
   const [form, setForm] = useState<ClosureForm>(
     initial
-      ? { start_date: initial.start_date, end_date: initial.end_date, reason: initial.reason ?? '' }
+      ? {
+          start_date: initial.start_date,
+          end_date: initial.end_date,
+          all_day: initial.all_day,
+          start_time: initial.start_time ?? '',
+          end_time: initial.end_time ?? '',
+          reason: initial.reason ?? '',
+        }
       : emptyForm,
   )
   const [error, setError] = useState<string | null>(null)
@@ -65,6 +82,39 @@ function ClosureFormPanel({
           />
         </div>
       </div>
+      <label className="flex items-center gap-2 text-sm text-gray-700">
+        <input
+          type="checkbox"
+          checked={form.all_day}
+          onChange={(e) => setForm({ ...form, all_day: e.target.checked })}
+          className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+        />
+        All day
+      </label>
+      {!form.all_day && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Start time</label>
+            <input
+              type="time"
+              required
+              value={form.start_time}
+              onChange={(e) => setForm({ ...form, start_time: e.target.value })}
+              className="w-full rounded-lg border border-gray-300 px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">End time</label>
+            <input
+              type="time"
+              required
+              value={form.end_time}
+              onChange={(e) => setForm({ ...form, end_time: e.target.value })}
+              className="w-full rounded-lg border border-gray-300 px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+        </div>
+      )}
       <div>
         <label className="block text-xs font-medium text-gray-600 mb-1">Reason (optional)</label>
         <input
@@ -118,6 +168,9 @@ export default function AdminClosures() {
     const closure = await adminCreateClosure({
       start_date: form.start_date,
       end_date: form.end_date,
+      all_day: form.all_day,
+      start_time: form.all_day ? undefined : form.start_time,
+      end_time: form.all_day ? undefined : form.end_time,
       reason: form.reason || undefined,
     })
     setClosures((prev) => [...prev, closure].sort((a, b) => a.start_date.localeCompare(b.start_date)))
@@ -129,6 +182,9 @@ export default function AdminClosures() {
     const updated = await adminUpdateClosure(editing.id, {
       start_date: form.start_date,
       end_date: form.end_date,
+      all_day: form.all_day,
+      start_time: form.all_day ? undefined : form.start_time,
+      end_time: form.all_day ? undefined : form.end_time,
       reason: form.reason || undefined,
     })
     setClosures((prev) => prev.map((c) => (c.id === updated.id ? updated : c)))
@@ -182,6 +238,12 @@ export default function AdminClosures() {
                       {closure.start_date === closure.end_date
                         ? closure.start_date
                         : `${closure.start_date} – ${closure.end_date}`}
+                      {!closure.all_day && closure.start_time && closure.end_time && (
+                        <span className="text-gray-500 font-normal">
+                          {' '}
+                          · {closure.start_time}–{closure.end_time}
+                        </span>
+                      )}
                     </p>
                     {closure.reason && (
                       <p className="text-xs text-gray-500 mt-0.5">{closure.reason}</p>

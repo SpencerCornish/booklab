@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -140,7 +141,8 @@ func (q *Queries) ListBookingsDueReminder(ctx context.Context, withinHours int) 
 	rows, err := q.pool.Query(ctx, `
 		SELECT `+bookingColumns+` FROM bookings
 		WHERE reminder_sent = FALSE AND status = 'confirmed'
-		  AND start_time BETWEEN NOW() AND NOW() + ($1 || ' hours')::interval`,
+		  AND start_time BETWEEN NOW() AND NOW() + ($1 || ' hours')::interval
+		  AND start_time - created_at >= ($1 || ' hours')::interval`,
 		fmt.Sprintf("%d", withinHours),
 	)
 	if err != nil {
@@ -335,8 +337,10 @@ func collectBookings(rows pgx.Rows) ([]*Booking, error) {
 
 // ----- Closures -----
 
+const closureSelectCols = `id, start_date, end_date, all_day, start_time, end_time, reason, created_at`
+
 func (q *Queries) ListClosures(ctx context.Context) ([]*Closure, error) {
-	rows, err := q.pool.Query(ctx, `SELECT id, start_date, end_date, reason, created_at FROM closures ORDER BY start_date`)
+	rows, err := q.pool.Query(ctx, `SELECT `+closureSelectCols+` FROM closures ORDER BY start_date`)
 	if err != nil {
 		return nil, err
 	}
@@ -346,7 +350,7 @@ func (q *Queries) ListClosures(ctx context.Context) ([]*Closure, error) {
 
 func (q *Queries) ListClosuresInRange(ctx context.Context, from, to time.Time) ([]*Closure, error) {
 	rows, err := q.pool.Query(ctx, `
-		SELECT id, start_date, end_date, reason, created_at FROM closures
+		SELECT `+closureSelectCols+` FROM closures
 		WHERE start_date <= $2 AND end_date >= $1
 		ORDER BY start_date`,
 		from, to,
@@ -359,25 +363,26 @@ func (q *Queries) ListClosuresInRange(ctx context.Context, from, to time.Time) (
 }
 
 func (q *Queries) GetClosure(ctx context.Context, id int32) (*Closure, error) {
-	row := q.pool.QueryRow(ctx, `SELECT id, start_date, end_date, reason, created_at FROM closures WHERE id = $1`, id)
+	row := q.pool.QueryRow(ctx, `SELECT `+closureSelectCols+` FROM closures WHERE id = $1`, id)
 	return scanClosure(row)
 }
 
-func (q *Queries) CreateClosure(ctx context.Context, start, end time.Time, reason *string) (*Closure, error) {
+func (q *Queries) CreateClosure(ctx context.Context, start, end time.Time, allDay bool, startTime, endTime *time.Time, reason *string) (*Closure, error) {
 	row := q.pool.QueryRow(ctx, `
-		INSERT INTO closures (start_date, end_date, reason) VALUES ($1, $2, $3)
-		RETURNING id, start_date, end_date, reason, created_at`,
-		start, end, reason,
+		INSERT INTO closures (start_date, end_date, all_day, start_time, end_time, reason)
+		VALUES ($1, $2, $3, $4, $5, $6)
+		RETURNING `+closureSelectCols,
+		start, end, allDay, startTime, endTime, reason,
 	)
 	return scanClosure(row)
 }
 
-func (q *Queries) UpdateClosure(ctx context.Context, id int32, start, end time.Time, reason *string) (*Closure, error) {
+func (q *Queries) UpdateClosure(ctx context.Context, id int32, start, end time.Time, allDay bool, startTime, endTime *time.Time, reason *string) (*Closure, error) {
 	row := q.pool.QueryRow(ctx, `
-		UPDATE closures SET start_date = $2, end_date = $3, reason = $4
+		UPDATE closures SET start_date = $2, end_date = $3, all_day = $4, start_time = $5, end_time = $6, reason = $7
 		WHERE id = $1
-		RETURNING id, start_date, end_date, reason, created_at`,
-		id, start, end, reason,
+		RETURNING `+closureSelectCols,
+		id, start, end, allDay, startTime, endTime, reason,
 	)
 	return scanClosure(row)
 }
@@ -389,11 +394,28 @@ func (q *Queries) DeleteClosure(ctx context.Context, id int32) error {
 
 func scanClosure(row pgx.Row) (*Closure, error) {
 	var c Closure
-	err := row.Scan(&c.ID, &c.StartDate, &c.EndDate, &c.Reason, &c.CreatedAt)
+	var startTime, endTime pgtype.Time
+	err := row.Scan(&c.ID, &c.StartDate, &c.EndDate, &c.AllDay, &startTime, &endTime, &c.Reason, &c.CreatedAt)
 	if err != nil {
 		return nil, err
 	}
+	c.StartTime = pgtypeTimeToPtr(startTime)
+	c.EndTime = pgtypeTimeToPtr(endTime)
 	return &c, nil
+}
+
+func pgtypeTimeToPtr(t pgtype.Time) *time.Time {
+	if !t.Valid {
+		return nil
+	}
+	us := t.Microseconds
+	h := us / 3600000000
+	us %= 3600000000
+	m := us / 60000000
+	us %= 60000000
+	s := us / 1000000
+	result := time.Date(0, 1, 1, int(h), int(m), int(s), 0, time.UTC)
+	return &result
 }
 
 func collectClosures(rows pgx.Rows) ([]*Closure, error) {

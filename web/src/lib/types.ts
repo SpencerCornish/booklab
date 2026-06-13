@@ -64,6 +64,9 @@ export interface Closure {
   id: number
   start_date: string
   end_date: string
+  all_day: boolean
+  start_time?: string
+  end_time?: string
   reason?: string
   created_at: string
 }

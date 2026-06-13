@@ -610,6 +610,16 @@ components:
         end_date:
           type: string
           format: date
+        all_day:
+          type: boolean
+        start_time:
+          type: string
+          nullable: true
+          description: HH:MM, present when all_day is false
+        end_time:
+          type: string
+          nullable: true
+          description: HH:MM, present when all_day is false
         reason:
           type: string
           nullable: true
@@ -627,5 +637,14 @@ components:
         end_date:
           type: string
           format: date
+        all_day:
+          type: boolean
+          default: true
+        start_time:
+          type: string
+          description: HH:MM, required when all_day is false
+        end_time:
+          type: string
+          description: HH:MM, required when all_day is false
         reason:
           type: string

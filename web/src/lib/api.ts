@@ -116,6 +116,9 @@ export const adminListClosures = () => request<Closure[]>('/admin/closures')
 export const adminCreateClosure = (body: {
   start_date: string
   end_date: string
+  all_day?: boolean
+  start_time?: string
+  end_time?: string
   reason?: string
 }) =>
   request<Closure>('/admin/closures', {
@@ -124,7 +127,14 @@ export const adminCreateClosure = (body: {
   })
 export const adminUpdateClosure = (
   id: number,
-  body: { start_date: string; end_date: string; reason?: string },
+  body: {
+    start_date: string
+    end_date: string
+    all_day?: boolean
+    start_time?: string
+    end_time?: string
+    reason?: string
+  },
 ) =>
   request<Closure>(`/admin/closures/${id}`, {
     method: 'PUT',

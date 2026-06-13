@@ -106,6 +106,10 @@ func (s *Scheduler) completeExpiredBookings(ctx context.Context, settings *db.Se
 }
 
 func (s *Scheduler) sendReminders(ctx context.Context, settings *db.Settings) int {
+	if settings.ReminderHoursBefore <= 0 {
+		return 0
+	}
+
 	bookings, err := s.queries.ListBookingsDueReminder(ctx, int(settings.ReminderHoursBefore))
 	if err != nil {
 		s.logger.Error("scheduler list bookings due reminder failed", "error", err)

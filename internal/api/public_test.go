@@ -150,7 +150,7 @@ func TestValidateBookingCreate_rejectsClosureOverlap(t *testing.T) {
 
 	startC := time.Date(2035, 8, 1, 0, 0, 0, 0, time.UTC)
 	endC := time.Date(2035, 8, 31, 0, 0, 0, 0, time.UTC)
-	if _, err := q.CreateClosure(ctx, startC, endC, nil); err != nil {
+	if _, err := q.CreateClosure(ctx, startC, endC, true, nil, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 

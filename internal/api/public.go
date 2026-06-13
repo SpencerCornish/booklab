@@ -63,11 +63,7 @@ func (s *Server) handleGetAvailability(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if len(closures) > 0 {
-		reason := ""
-		if closures[0].Reason != nil {
-			reason = *closures[0].Reason
-		}
+	if closed, reason := allDayClosureForDate(closures, date, loc); closed {
 		writeJSON(w, http.StatusOK, map[string]any{
 			"date":           dateStr,
 			"is_closed":      true,
@@ -106,6 +102,12 @@ func (s *Server) handleGetAvailability(w http.ResponseWriter, r *http.Request) {
 		for _, b := range bookings {
 			// Overlap check: slot overlaps booking if slot.start < b.end && slot.end > b.start
 			if t.Before(b.EndTime) && slotEnd.After(b.StartTime) {
+				available = false
+				break
+			}
+		}
+		for _, c := range closures {
+			if slotOverlapsPartialClosure(t, slotEnd, c, loc) {
 				available = false
 				break
 			}
@@ -177,6 +179,15 @@ func (s *Server) handleCreateBooking(w http.ResponseWriter, r *http.Request) {
 		}
 		s.writeError(w, r, http.StatusInternalServerError, "failed to create booking", err)
 		return
+	}
+
+	if settings.ReminderHoursBefore > 0 &&
+		booking.StartTime.Sub(booking.CreatedAt) < time.Duration(settings.ReminderHoursBefore)*time.Hour {
+		if err := s.queries.MarkReminderSent(r.Context(), booking.ID); err != nil {
+			s.logger.Error("mark short-notice booking reminder skipped", "booking_id", booking.ID, "error", err)
+		} else {
+			booking.ReminderSent = true
+		}
 	}
 
 	writeJSON(w, http.StatusCreated, map[string]any{
@@ -423,8 +434,10 @@ func (s *Server) validateBookingCreate(ctx context.Context, start, end time.Time
 	if err != nil {
 		return "", err
 	}
-	if len(closures) > 0 {
-		return "resource is closed for part of this booking", nil
+	for _, c := range closures {
+		if bookingOverlapsClosure(start, end, c, loc) {
+			return "resource is closed for part of this booking", nil
+		}
 	}
 	return "", nil
 }
