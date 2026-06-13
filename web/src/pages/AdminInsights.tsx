@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { format } from 'date-fns'
 import { adminGetInsights } from '../lib/api'
 import type { InsightsData } from '../lib/types'
 
@@ -148,6 +149,66 @@ export default function AdminInsights() {
           </div>
         </section>
       </div>
+
+      <section className="mt-8">
+        <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">
+          Customers
+        </h2>
+        <div className="bg-white rounded-xl border border-gray-200 overflow-x-auto">
+          {insights.customers.length === 0 ? (
+            <p className="px-4 py-6 text-sm text-gray-400">No customers yet.</p>
+          ) : (
+            <table className="w-full min-w-[640px]">
+              <thead className="bg-gray-50 border-b border-gray-200">
+                <tr>
+                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">
+                    Customer
+                  </th>
+                  <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">
+                    Bookings
+                  </th>
+                  <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">
+                    Cancelled
+                  </th>
+                  <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">
+                    Revenue
+                  </th>
+                  <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">
+                    Last visit
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {insights.customers.map((customer) => (
+                  <tr key={customer.email} className="hover:bg-gray-50">
+                    <td className="px-4 py-3">
+                      <p className="text-sm font-medium text-gray-900">{customer.name}</p>
+                      <p className="text-xs text-gray-500">{customer.email}</p>
+                    </td>
+                    <td className="px-4 py-3 text-sm text-gray-600 text-right font-medium">
+                      {customer.booking_count}
+                    </td>
+                    <td className="px-4 py-3 text-sm text-gray-500 text-right">
+                      {customer.cancelled_count > 0 ? customer.cancelled_count : '—'}
+                    </td>
+                    <td className="px-4 py-3 text-sm text-gray-800 text-right font-medium">
+                      {formatCurrency(customer.revenue_cents)}
+                    </td>
+                    <td className="px-4 py-3 text-sm text-gray-500 text-right">
+                      {customer.last_booking_at
+                        ? format(new Date(customer.last_booking_at), 'MMM d, yyyy')
+                        : '—'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+        <p className="text-xs text-gray-400 mt-2">
+          Sorted by collected revenue. Revenue reflects charged bookings only.
+        </p>
+      </section>
     </div>
   )
 }

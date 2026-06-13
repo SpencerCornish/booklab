@@ -478,6 +478,7 @@ components:
         - recent_bookings
         - bookings_by_status
         - referral_sources
+        - customers
       properties:
         total_bookings:
           type: integer
@@ -496,6 +497,31 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/ReferralSourceCount"
+        customers:
+          type: array
+          items:
+            $ref: "#/components/schemas/CustomerInsight"
+
+    CustomerInsight:
+      type: object
+      required: [email, name, booking_count, cancelled_count, revenue_cents]
+      properties:
+        email:
+          type: string
+        name:
+          type: string
+        booking_count:
+          type: integer
+          description: Non-cancelled bookings
+        cancelled_count:
+          type: integer
+        revenue_cents:
+          type: integer
+          description: Collected revenue from charged bookings
+        last_booking_at:
+          type: string
+          format: date-time
+          nullable: true
 
     ReferralSourceCount:
       type: object

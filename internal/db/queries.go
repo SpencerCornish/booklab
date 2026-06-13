@@ -546,6 +546,15 @@ type ReferralSourceCount struct {
 	Count  int64  `json:"count"`
 }
 
+type CustomerInsight struct {
+	Email          string     `json:"email"`
+	Name           string     `json:"name"`
+	BookingCount   int64      `json:"booking_count"`
+	CancelledCount int64      `json:"cancelled_count"`
+	RevenueCents   int64      `json:"revenue_cents"`
+	LastBookingAt  *time.Time `json:"last_booking_at"`
+}
+
 type BookingInsights struct {
 	TotalBookings     int64                 `json:"total_bookings"`
 	TotalRevenueCents int64                 `json:"total_revenue_cents"`
@@ -553,12 +562,14 @@ type BookingInsights struct {
 	RecentBookings    int64                 `json:"recent_bookings"`
 	BookingsByStatus  map[string]int64      `json:"bookings_by_status"`
 	ReferralSources   []ReferralSourceCount `json:"referral_sources"`
+	Customers         []CustomerInsight     `json:"customers"`
 }
 
 func (q *Queries) GetBookingInsights(ctx context.Context) (*BookingInsights, error) {
 	insights := &BookingInsights{
 		BookingsByStatus: make(map[string]int64),
 		ReferralSources:  []ReferralSourceCount{},
+		Customers:        []CustomerInsight{},
 	}
 
 	if err := q.pool.QueryRow(ctx, `SELECT COUNT(*) FROM bookings`).Scan(&insights.TotalBookings); err != nil {
@@ -619,6 +630,33 @@ func (q *Queries) GetBookingInsights(ctx context.Context) (*BookingInsights, err
 		insights.ReferralSources = append(insights.ReferralSources, rc)
 	}
 	if err := refRows.Err(); err != nil {
+		return nil, err
+	}
+
+	custRows, err := q.pool.Query(ctx, `
+		SELECT
+			email,
+			(ARRAY_AGG(name ORDER BY created_at DESC))[1] AS name,
+			COUNT(*) FILTER (WHERE status != 'cancelled')::bigint AS booking_count,
+			COUNT(*) FILTER (WHERE status = 'cancelled')::bigint AS cancelled_count,
+			COALESCE(SUM(amount_cents) FILTER (WHERE status = 'charged' AND amount_cents IS NOT NULL), 0)::bigint AS revenue_cents,
+			MAX(start_time) FILTER (WHERE status != 'cancelled') AS last_booking_at
+		FROM bookings
+		GROUP BY email
+		HAVING COUNT(*) FILTER (WHERE status != 'cancelled') > 0
+		ORDER BY revenue_cents DESC, booking_count DESC, email`)
+	if err != nil {
+		return nil, err
+	}
+	defer custRows.Close()
+	for custRows.Next() {
+		var c CustomerInsight
+		if err := custRows.Scan(&c.Email, &c.Name, &c.BookingCount, &c.CancelledCount, &c.RevenueCents, &c.LastBookingAt); err != nil {
+			return nil, err
+		}
+		insights.Customers = append(insights.Customers, c)
+	}
+	if err := custRows.Err(); err != nil {
 		return nil, err
 	}
 

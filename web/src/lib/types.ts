@@ -25,6 +25,15 @@ export interface ReferralSourceCount {
   count: number
 }
 
+export interface CustomerInsight {
+  email: string
+  name: string
+  booking_count: number
+  cancelled_count: number
+  revenue_cents: number
+  last_booking_at?: string
+}
+
 export interface InsightsData {
   total_bookings: number
   total_revenue_cents: number
@@ -32,6 +41,7 @@ export interface InsightsData {
   recent_bookings: number
   bookings_by_status: Record<string, number>
   referral_sources: ReferralSourceCount[]
+  customers: CustomerInsight[]
 }
 
 export interface TimeSlot {
