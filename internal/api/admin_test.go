@@ -49,12 +49,8 @@ func TestAdminChargeBooking_idempotentSecondRequest(t *testing.T) {
 	// Completed booking eligible for charge
 	start := time.Date(2031, 3, 1, 12, 0, 0, 0, time.UTC)
 	end := start.Add(2 * time.Hour)
-	b, err := q.CreateBooking(ctx, "Pat", "pat@example.com", start, end, "si_x")
+	b, err := q.CreateBooking(ctx, "Pat", "pat@example.com", nil, start, end, "si_x", "pm_test_123")
 	if err != nil {
-		t.Fatal(err)
-	}
-	pm := "pm_test_123"
-	if _, err := q.UpdateBookingPaymentMethod(ctx, b.ID, pm); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := q.UpdateBookingStatus(ctx, b.ID, "completed"); err != nil {
@@ -317,4 +313,45 @@ func doReq(t *testing.T, client *http.Client, req *http.Request) *http.Response 
 		t.Fatal(err)
 	}
 	return resp
+}
+
+func TestAdminUpdateBooking_rejectsCompletedWithoutPaymentMethod(t *testing.T) {
+	ctx := context.Background()
+	pool, q := openTestPool(t)
+	truncateBookingData(t, ctx, pool)
+	resetSettingsUTC(t, ctx, q)
+
+	ms := &mockStripe{}
+	emailSvc := emailsvc.New("127.0.0.1", 1025, "", "", "booklab@localhost", testLogger())
+	srv := New(testConfig(), q, ms, emailSvc, nil, testLogger())
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+
+	hash, err := bcrypt.GenerateFromPassword([]byte("s3cret!"), bcrypt.MinCost)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := q.CreateAdminUser(ctx, "admin", string(hash)); err != nil {
+		t.Fatal(err)
+	}
+
+	start := time.Date(2031, 4, 1, 12, 0, 0, 0, time.UTC)
+	end := start.Add(2 * time.Hour)
+	b, err := q.CreateBooking(ctx, "Pat", "pat@example.com", nil, start, end, "si_orphan", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	sess := loginAndSession(t, ts.URL, "admin", "s3cret!")
+	csrfTok := "testcsrf01234567890123456789012"
+	patchURL := ts.URL + "/api/admin/bookings/" + strconv.FormatInt(int64(b.ID), 10)
+	req := mustNewRequest(t, http.MethodPatch, patchURL, strings.NewReader(`{"status":"completed"}`))
+	addAdminCookies(req, sess, csrfTok)
+	req.Header.Set("X-CSRF-Token", csrfTok)
+	resp := doReq(t, ts.Client(), req)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status %d want 400 body %s", resp.StatusCode, b)
+	}
 }

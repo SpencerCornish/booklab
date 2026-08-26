@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -149,23 +150,18 @@ func (s *Server) handleGetAvailability(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (s *Server) handleCreateBooking(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handlePrepareBooking(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Name      string            `json:"name"`
-		Email     string            `json:"email"`
-		Metadata  map[string]string `json:"metadata"`
-		StartTime time.Time         `json:"start_time"`
-		EndTime   time.Time         `json:"end_time"`
+		Email     string    `json:"email"`
+		StartTime time.Time `json:"start_time"`
+		EndTime   time.Time `json:"end_time"`
 	}
 	if !s.readJSONRequest(w, r, &req) {
 		return
 	}
-	if req.Name == "" || req.Email == "" {
-		s.writeError(w, r, http.StatusBadRequest, "name and email are required", nil)
+	if req.Email == "" {
+		s.writeError(w, r, http.StatusBadRequest, "email is required", nil)
 		return
-	}
-	if req.Metadata == nil {
-		req.Metadata = map[string]string{}
 	}
 	if req.EndTime.Before(req.StartTime) || req.EndTime.Equal(req.StartTime) {
 		s.writeError(w, r, http.StatusBadRequest, "end_time must be after start_time", nil)
@@ -186,16 +182,83 @@ func (s *Server) handleCreateBooking(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Create Stripe SetupIntent
+	if err := s.ensureSlotAvailable(r.Context(), req.StartTime, req.EndTime); err != nil {
+		if isConflictError(err) {
+			s.writeError(w, r, http.StatusConflict, "this time slot is no longer available", err)
+			return
+		}
+		s.writeError(w, r, http.StatusInternalServerError, "failed to check availability", err)
+		return
+	}
+
 	setupIntentID, clientSecret, err := s.stripe.CreateSetupIntent(req.Email)
 	if err != nil {
 		s.writeError(w, r, http.StatusInternalServerError, "failed to create payment setup", err)
 		return
 	}
 
-	booking, err := s.queries.CreateBooking(r.Context(), req.Name, req.Email, req.Metadata, req.StartTime, req.EndTime, setupIntentID)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"setup_intent_id":            setupIntentID,
+		"setup_intent_client_secret": clientSecret,
+	})
+}
+
+func (s *Server) handleCreateBooking(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		SetupIntentID string            `json:"setup_intent_id"`
+		Name          string            `json:"name"`
+		Email         string            `json:"email"`
+		Metadata      map[string]string `json:"metadata"`
+		StartTime     time.Time         `json:"start_time"`
+		EndTime       time.Time         `json:"end_time"`
+	}
+	if !s.readJSONRequest(w, r, &req) {
+		return
+	}
+	if req.SetupIntentID == "" || req.Name == "" || req.Email == "" {
+		s.writeError(w, r, http.StatusBadRequest, "setup_intent_id, name, and email are required", nil)
+		return
+	}
+	if req.Metadata == nil {
+		req.Metadata = map[string]string{}
+	}
+	if req.EndTime.Before(req.StartTime) || req.EndTime.Equal(req.StartTime) {
+		s.writeError(w, r, http.StatusBadRequest, "end_time must be after start_time", nil)
+		return
+	}
+
+	existing, err := s.queries.GetBookingBySetupIntentID(r.Context(), req.SetupIntentID)
+	if err == nil {
+		writeJSON(w, http.StatusCreated, map[string]any{"booking": bookingToPublic(existing)})
+		return
+	}
+	if err != pgx.ErrNoRows {
+		s.writeError(w, r, http.StatusInternalServerError, "failed to load booking", err)
+		return
+	}
+
+	pmID, err := s.stripe.GetPaymentMethodFromSetupIntent(req.SetupIntentID)
 	if err != nil {
-		// Check for exclusion constraint violation (conflict)
+		s.writeError(w, r, http.StatusBadRequest, "card not confirmed", err)
+		return
+	}
+
+	settings, err := s.queries.GetSettings(r.Context())
+	if err != nil {
+		s.writeError(w, r, http.StatusInternalServerError, "failed to load settings", err)
+		return
+	}
+
+	if badReq, err := s.validateBookingCreate(r.Context(), req.StartTime, req.EndTime, settings); err != nil {
+		s.writeError(w, r, http.StatusInternalServerError, "failed to validate booking", err)
+		return
+	} else if badReq != "" {
+		s.writeError(w, r, http.StatusBadRequest, badReq, nil)
+		return
+	}
+
+	booking, err := s.queries.CreateBooking(r.Context(), req.Name, req.Email, req.Metadata, req.StartTime, req.EndTime, req.SetupIntentID, pmID)
+	if err != nil {
 		if isConflictError(err) {
 			s.writeError(w, r, http.StatusConflict, "this time slot is no longer available", err)
 			return
@@ -213,10 +276,9 @@ func (s *Server) handleCreateBooking(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	writeJSON(w, http.StatusCreated, map[string]any{
-		"booking":                    bookingToPublic(booking),
-		"setup_intent_client_secret": clientSecret,
-	})
+	s.sendBookingConfirmationEmails(booking, settings)
+
+	writeJSON(w, http.StatusCreated, map[string]any{"booking": bookingToPublic(booking)})
 }
 
 func (s *Server) handleGetBooking(w http.ResponseWriter, r *http.Request) {
@@ -237,52 +299,8 @@ func (s *Server) handleGetBooking(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, bookingToPublic(booking))
 }
 
-func (s *Server) handleConfirmBookingCard(w http.ResponseWriter, r *http.Request) {
-	token, err := uuid.Parse(chi.URLParam(r, "token"))
-	if err != nil {
-		s.writeError(w, r, http.StatusBadRequest, "invalid token", err)
-		return
-	}
-
-	booking, err := s.queries.GetBookingByToken(r.Context(), token)
-	if err != nil {
-		if err == pgx.ErrNoRows {
-			s.writeError(w, r, http.StatusNotFound, "booking not found", err)
-			return
-		}
-		s.writeError(w, r, http.StatusInternalServerError, "failed to load booking", err)
-		return
-	}
-
-	if booking.StripePaymentMethodID != nil {
-		// Already stored, idempotent
-		w.WriteHeader(http.StatusNoContent)
-		return
-	}
-
-	if booking.StripeSetupIntentID == nil {
-		s.writeError(w, r, http.StatusBadRequest, "no setup intent on booking", nil)
-		return
-	}
-
-	pmID, err := s.stripe.GetPaymentMethodFromSetupIntent(*booking.StripeSetupIntentID)
-	if err != nil {
-		s.writeError(w, r, http.StatusBadRequest, "card not yet confirmed", err)
-		return
-	}
-
-	if _, err := s.queries.UpdateBookingPaymentMethod(r.Context(), booking.ID, pmID); err != nil {
-		s.writeError(w, r, http.StatusInternalServerError, "failed to save payment method", err)
-		return
-	}
-
-	// Card confirmed — now safe to send confirmation and staff notification emails.
+func (s *Server) sendBookingConfirmationEmails(booking *db.Booking, settings *db.Settings) {
 	go func() {
-		settings, err := s.queries.GetSettings(context.Background())
-		if err != nil {
-			s.logger.Error("confirm-card: failed to load settings for emails", "booking_id", booking.ID, "error", err)
-			return
-		}
 		data := emailsvc.ConfirmationData{
 			ResourceName: settings.ResourceName,
 			BookerName:   booking.Name,
@@ -295,29 +313,40 @@ func (s *Server) handleConfirmBookingCard(w http.ResponseWriter, r *http.Request
 		if err := s.email.SendConfirmation(booking.Email, data); err != nil {
 			s.logger.Error("send confirmation email failed", "booking_id", booking.ID, "email", booking.Email, "error", err)
 		}
-		if settings.NotificationEmails != "" {
-			priorCount, _ := s.queries.CountPriorBookings(context.Background(), booking.Email, booking.ID)
-			staffData := emailsvc.StaffNewBookingData{
-				ResourceName:      settings.ResourceName,
-				BookerName:        booking.Name,
-				BookerEmail:       booking.Email,
-				Metadata:          booking.Metadata,
-				StartTime:         booking.StartTime,
-				EndTime:           booking.EndTime,
-				IsReturnCustomer:  priorCount > 0,
-				PriorBookingCount: priorCount,
-				AdminURL:          s.cfg.AppURL + "/admin/bookings",
-				Timezone:          settings.Timezone,
-			}
-			for _, addr := range splitEmails(settings.NotificationEmails) {
-				if err := s.email.SendStaffNewBooking(addr, staffData); err != nil {
-					s.logger.Error("staff new booking email failed", "booking_id", booking.ID, "recipient", addr, "error", err)
-				}
+		if settings.NotificationEmails == "" {
+			return
+		}
+		priorCount, _ := s.queries.CountPriorBookings(context.Background(), booking.Email, booking.ID)
+		staffData := emailsvc.StaffNewBookingData{
+			ResourceName:      settings.ResourceName,
+			BookerName:        booking.Name,
+			BookerEmail:       booking.Email,
+			Metadata:          booking.Metadata,
+			StartTime:         booking.StartTime,
+			EndTime:           booking.EndTime,
+			IsReturnCustomer:  priorCount > 0,
+			PriorBookingCount: priorCount,
+			AdminURL:          s.cfg.AppURL + "/admin/bookings",
+			Timezone:          settings.Timezone,
+		}
+		for _, addr := range splitEmails(settings.NotificationEmails) {
+			if err := s.email.SendStaffNewBooking(addr, staffData); err != nil {
+				s.logger.Error("staff new booking email failed", "booking_id", booking.ID, "recipient", addr, "error", err)
 			}
 		}
 	}()
+}
 
-	w.WriteHeader(http.StatusNoContent)
+// ensureSlotAvailable returns an error if any non-cancelled booking overlaps [start, end).
+func (s *Server) ensureSlotAvailable(ctx context.Context, start, end time.Time) error {
+	bookings, err := s.queries.ListBookingsOverlapping(ctx, start, end)
+	if err != nil {
+		return err
+	}
+	if len(bookings) > 0 {
+		return fmt.Errorf("bookings_no_overlap: slot conflict with booking %d", bookings[0].ID)
+	}
+	return nil
 }
 
 func (s *Server) handleCancelBooking(w http.ResponseWriter, r *http.Request) {

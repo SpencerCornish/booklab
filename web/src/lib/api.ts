@@ -5,8 +5,9 @@ import type {
   BookingAdmin,
   BookingPublic,
   Closure,
-  CreateBookingResponse,
+  FinalizeBookingResponse,
   InsightsData,
+  PrepareBookingResponse,
   PublicSettings,
   Settings,
 } from './types'
@@ -56,14 +57,25 @@ export const getPrivacy = () => request<{ content: string }>('/privacy')
 export const getAvailability = (date: string) =>
   request<AvailabilityResponse>(`/availability?date=${date}`)
 
+export const prepareBooking = (body: {
+  email: string
+  start_time: string
+  end_time: string
+}) =>
+  request<PrepareBookingResponse>('/bookings/prepare', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  })
+
 export const createBooking = (body: {
+  setup_intent_id: string
   name: string
   email: string
   metadata?: Record<string, string>
   start_time: string
   end_time: string
 }) =>
-  request<CreateBookingResponse>('/bookings', {
+  request<FinalizeBookingResponse>('/bookings', {
     method: 'POST',
     body: JSON.stringify(body),
   })
@@ -73,9 +85,6 @@ export const getBookingByToken = (token: string) =>
 
 export const cancelBooking = (token: string) =>
   request<BookingPublic>(`/bookings/${token}/cancel`, { method: 'POST' })
-
-export const confirmBookingCard = (token: string) =>
-  request<void>(`/bookings/${token}/confirm-card`, { method: 'POST' })
 
 // Admin
 export const adminLogin = (username: string, password: string) =>

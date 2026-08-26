@@ -305,7 +305,7 @@ function BookingActions({
             Charge
           </button>
         )}
-      {booking.status === 'confirmed' && (
+      {booking.status === 'confirmed' && booking.stripe_payment_method_id && (
         <button
           onClick={onMarkDone}
           className={`${btn} bg-gray-100 text-gray-700 hover:bg-gray-200`}

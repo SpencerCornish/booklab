@@ -99,13 +99,22 @@ func scanSettings(row pgx.Row) (*Settings, error) {
 
 // ----- Bookings -----
 
-func (q *Queries) CreateBooking(ctx context.Context, name, email string, metadata map[string]string, start, end time.Time, setupIntentID string) (*Booking, error) {
+func (q *Queries) CreateBooking(ctx context.Context, name, email string, metadata map[string]string, start, end time.Time, setupIntentID, paymentMethodID string) (*Booking, error) {
+	var pm any
+	if paymentMethodID != "" {
+		pm = paymentMethodID
+	}
 	row := q.pool.QueryRow(ctx, `
-		INSERT INTO bookings (name, email, metadata, start_time, end_time, stripe_setup_intent_id)
-		VALUES ($1, $2, $3, $4, $5, $6)
+		INSERT INTO bookings (name, email, metadata, start_time, end_time, stripe_setup_intent_id, stripe_payment_method_id)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
 		RETURNING `+bookingColumns,
-		name, email, metadata, start, end, setupIntentID,
+		name, email, metadata, start, end, setupIntentID, pm,
 	)
+	return scanBooking(row)
+}
+
+func (q *Queries) GetBookingBySetupIntentID(ctx context.Context, setupIntentID string) (*Booking, error) {
+	row := q.pool.QueryRow(ctx, `SELECT `+bookingColumns+` FROM bookings WHERE stripe_setup_intent_id = $1`, setupIntentID)
 	return scanBooking(row)
 }
 
@@ -131,6 +140,21 @@ func (q *Queries) ListBookings(ctx context.Context, p ListBookingsParams) ([]*Bo
 		  AND ($2::text IS NULL OR status = $2::booking_status)
 		ORDER BY start_time DESC`,
 		p.Date, p.Status,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return collectBookings(rows)
+}
+
+func (q *Queries) ListBookingsOverlapping(ctx context.Context, start, end time.Time) ([]*Booking, error) {
+	rows, err := q.pool.Query(ctx, `
+		SELECT `+bookingColumns+` FROM bookings
+		WHERE status != 'cancelled'
+		  AND start_time < $2 AND end_time > $1
+		ORDER BY start_time`,
+		start, end,
 	)
 	if err != nil {
 		return nil, err

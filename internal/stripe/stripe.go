@@ -57,6 +57,10 @@ func (s *Service) GetPaymentMethodFromSetupIntent(setupIntentID string) (string,
 		s.logger.Error("stripe get setup intent failed", "setup_intent_id", setupIntentID, "error", err)
 		return "", fmt.Errorf("get setup intent: %w", err)
 	}
+	if si.Status != stripe.SetupIntentStatusSucceeded {
+		s.logger.Warn("stripe setup intent not succeeded", "setup_intent_id", setupIntentID, "status", si.Status)
+		return "", fmt.Errorf("setup intent not succeeded")
+	}
 	if si.PaymentMethod == nil {
 		s.logger.Warn("stripe setup intent has no payment method", "setup_intent_id", setupIntentID)
 		return "", fmt.Errorf("setup intent has no payment method")

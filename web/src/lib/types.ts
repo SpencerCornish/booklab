@@ -82,9 +82,13 @@ export interface BookingAdmin extends BookingPublic {
   last_charge_error?: string
 }
 
-export interface CreateBookingResponse {
-  booking: BookingPublic
+export interface PrepareBookingResponse {
+  setup_intent_id: string
   setup_intent_client_secret: string
+}
+
+export interface FinalizeBookingResponse {
+  booking: BookingPublic
 }
 
 export interface Closure {

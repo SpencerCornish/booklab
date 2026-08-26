@@ -81,11 +81,39 @@ paths:
         "400":
           $ref: "#/components/responses/BadRequest"
 
+  /bookings/prepare:
+    post:
+      tags: [public]
+      summary: Prepare Stripe SetupIntent for a booking
+      description: Validates slot availability and returns a Stripe SetupIntent client secret. Does not create a booking row.
+      operationId: prepareBooking
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PrepareBookingRequest"
+      responses:
+        "200":
+          description: SetupIntent created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PrepareBookingResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "409":
+          description: Time slot conflict
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
   /bookings:
     post:
       tags: [public]
-      summary: Create a booking
-      description: Creates a confirmed booking and returns a Stripe SetupIntent client_secret for card collection.
+      summary: Finalize a booking after card confirmation
+      description: Verifies the SetupIntent succeeded, inserts a confirmed booking with payment method on file, and sends confirmation emails.
       operationId: createBooking
       requestBody:
         required: true
@@ -739,10 +767,30 @@ components:
 
     CreateBookingRequest:
       type: object
-      required: [name, email, start_time, end_time]
+      required: [setup_intent_id, name, email, start_time, end_time]
       properties:
+        setup_intent_id:
+          type: string
         name:
           type: string
+        email:
+          type: string
+          format: email
+        metadata:
+          type: object
+          additionalProperties:
+            type: string
+        start_time:
+          type: string
+          format: date-time
+        end_time:
+          type: string
+          format: date-time
+
+    PrepareBookingRequest:
+      type: object
+      required: [email, start_time, end_time]
+      properties:
         email:
           type: string
           format: email
@@ -753,14 +801,21 @@ components:
           type: string
           format: date-time
 
+    PrepareBookingResponse:
+      type: object
+      required: [setup_intent_id, setup_intent_client_secret]
+      properties:
+        setup_intent_id:
+          type: string
+        setup_intent_client_secret:
+          type: string
+
     CreateBookingResponse:
       type: object
-      required: [booking, setup_intent_client_secret]
+      required: [booking]
       properties:
         booking:
           $ref: "#/components/schemas/BookingPublic"
-        setup_intent_client_secret:
-          type: string
 
     BookingPublic:
       type: object

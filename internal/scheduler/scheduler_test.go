@@ -81,11 +81,8 @@ func TestAutoCharge_completed_concurrentOnlyOneCharge(t *testing.T) {
 
 	start := time.Date(2032, 4, 1, 12, 0, 0, 0, time.UTC)
 	end := start.Add(2 * time.Hour)
-	b, err := q.CreateBooking(ctx, "Sam", "sam@example.com", start, end, "si_sched")
+	b, err := q.CreateBooking(ctx, "Sam", "sam@example.com", nil, start, end, "si_sched", "pm_sched_1")
 	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := q.UpdateBookingPaymentMethod(ctx, b.ID, "pm_sched_1"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := q.UpdateBookingStatus(ctx, b.ID, db.BookingStatusCompleted); err != nil {

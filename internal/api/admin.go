@@ -329,6 +329,21 @@ func (s *Server) handleAdminUpdateBooking(w http.ResponseWriter, r *http.Request
 	if req.EndTime != nil {
 		booking, err = s.queries.UpdateBookingEndTime(r.Context(), id, *req.EndTime)
 	} else if req.Status != nil {
+		if *req.Status == db.BookingStatusCompleted {
+			existing, gerr := s.queries.GetBookingByID(r.Context(), id)
+			if gerr != nil {
+				if gerr == pgx.ErrNoRows {
+					s.writeError(w, r, http.StatusNotFound, "booking not found", gerr)
+					return
+				}
+				s.writeError(w, r, http.StatusInternalServerError, "failed to load booking", gerr)
+				return
+			}
+			if existing.StripePaymentMethodID == nil || *existing.StripePaymentMethodID == "" {
+				s.writeError(w, r, http.StatusBadRequest, "cannot mark booking completed without a payment method on file", nil)
+				return
+			}
+		}
 		booking, err = s.queries.UpdateBookingStatus(r.Context(), id, *req.Status)
 	} else {
 		s.writeError(w, r, http.StatusBadRequest, "no fields to update", nil)

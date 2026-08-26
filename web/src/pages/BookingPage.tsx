@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { format } from 'date-fns'
 import { loadStripe } from '@stripe/stripe-js'
 import { Elements, CardElement, useStripe, useElements } from '@stripe/react-stripe-js'
@@ -8,9 +8,8 @@ import { Footer } from '../components/Footer'
 import {
   getPublicSettings,
   getAvailability,
+  prepareBooking,
   createBooking,
-  cancelBooking,
-  confirmBookingCard,
   ApiError,
 } from '../lib/api'
 import type { PublicSettings, AvailabilityResponse, BookingPublic } from '../lib/types'
@@ -76,6 +75,7 @@ function BookingForm({ settings }: { settings: PublicSettings }) {
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<BookingPublic | null>(null)
+  const submittingRef = useRef(false)
 
   useEffect(() => {
     setLoadingSlots(true)
@@ -95,11 +95,12 @@ function BookingForm({ settings }: { settings: PublicSettings }) {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!stripe || !elements || !selectedStart || !selectedEnd) return
+    if (submittingRef.current) return
 
+    submittingRef.current = true
     setSubmitting(true)
     setError(null)
 
-    let createdBooking: Awaited<ReturnType<typeof createBooking>>['booking'] | null = null
     try {
       const metadata: Record<string, string> = {}
       if (phone) metadata['Phone'] = phone
@@ -111,14 +112,11 @@ function BookingForm({ settings }: { settings: PublicSettings }) {
         }
       }
 
-      const { booking, setup_intent_client_secret } = await createBooking({
-        name,
+      const { setup_intent_client_secret, setup_intent_id } = await prepareBooking({
         email,
-        metadata,
         start_time: selectedStart,
         end_time: selectedEnd,
       })
-      createdBooking = booking
 
       const cardElement = elements.getElement(CardElement)
       if (!cardElement) throw new Error('Card element not found')
@@ -128,23 +126,24 @@ function BookingForm({ settings }: { settings: PublicSettings }) {
       })
 
       if (stripeError) {
-        // Card setup failed - release the time slot by cancelling the booking
-        cancelBooking(booking.cancel_token).catch(() => {})
         setError(stripeError.message ?? 'Card setup failed')
         return
       }
 
-      // Persist the payment method to the booking so admin can charge later
-      await confirmBookingCard(booking.cancel_token)
+      const { booking } = await createBooking({
+        setup_intent_id,
+        name,
+        email,
+        metadata,
+        start_time: selectedStart,
+        end_time: selectedEnd,
+      })
 
       setSuccess(booking)
     } catch (err) {
-      // If booking was created but something else failed, clean it up
-      if (createdBooking && !(err instanceof ApiError)) {
-        cancelBooking(createdBooking.cancel_token).catch(() => {})
-      }
       setError(err instanceof ApiError ? err.message : 'Something went wrong')
     } finally {
+      submittingRef.current = false
       setSubmitting(false)
     }
   }
