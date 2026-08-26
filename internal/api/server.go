@@ -5,6 +5,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -52,23 +53,17 @@ func (s *Server) slogRequestLogger(next http.Handler) http.Handler {
 			"duration_ms", time.Since(start).Milliseconds(),
 			"remote_addr", r.RemoteAddr,
 		}
-		switch {
-		case status >= 500:
-			s.logger.Error("http_request", attrs...)
-		case status >= 400:
-			s.logger.Warn("http_request", attrs...)
-		default:
-			s.logger.Info("http_request", attrs...)
-		}
+		level := s.httpRequestLogLevel(r.URL.Path, status)
+		s.logger.Log(r.Context(), level, "http_request", attrs...)
 	})
 }
 
 func (s *Server) Handler() http.Handler {
 	r := chi.NewRouter()
 
-	r.Use(s.slogRequestLogger)
-	r.Use(middleware.Recoverer)
 	r.Use(middleware.RealIP)
+	r.Use(middleware.Recoverer)
+	r.Use(s.slogRequestLogger)
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins:   s.cfg.AllowedCORSOrigins(),
 		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
@@ -123,19 +118,31 @@ func (s *Server) handleSPA(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "frontend not built", http.StatusServiceUnavailable)
 		return
 	}
-	fileServer := http.FileServer(http.FS(s.webFS))
 
-	path := r.URL.Path
-	if path == "/" {
-		path = "/index.html"
+	urlPath := r.URL.Path
+	if isProbePath(urlPath) {
+		http.NotFound(w, r)
+		return
 	}
-	f, err := s.webFS.Open(path[1:])
-	if err != nil {
+
+	if urlPath == "/" {
 		http.ServeFileFS(w, r, s.webFS, "index.html")
 		return
 	}
-	f.Close()
-	fileServer.ServeHTTP(w, r)
+
+	rel := strings.TrimPrefix(urlPath, "/")
+	if f, err := s.webFS.Open(rel); err == nil {
+		f.Close()
+		http.FileServer(http.FS(s.webFS)).ServeHTTP(w, r)
+		return
+	}
+
+	if isSPARoute(urlPath) {
+		http.ServeFileFS(w, r, s.webFS, "index.html")
+		return
+	}
+
+	http.NotFound(w, r)
 }
 
 func (s *Server) Addr() string {

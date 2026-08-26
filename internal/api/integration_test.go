@@ -14,7 +14,7 @@ import (
 )
 
 func testLogger() *slog.Logger {
-	return slog.New(slog.DiscardHandler())
+	return slog.New(slog.DiscardHandler)
 }
 
 // testDSN returns a Postgres URL for integration tests. When unset, callers should t.Skip.
