@@ -2,6 +2,8 @@ package api
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -21,15 +23,17 @@ func (s *Server) handleGetPublicSettings(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"resource_name":     settings.ResourceName,
-		"hourly_rate_cents": settings.HourlyRateCents,
-		"currency":          settings.Currency,
-		"bookable_start":    settings.BookableStart.Format("15:04"),
-		"bookable_end":      settings.BookableEnd.Format("15:04"),
-		"min_hours":         settings.MinHours,
-		"max_hours":         settings.MaxHours,
-		"timezone":          settings.Timezone,
-		"referral_sources":  settings.ReferralSources,
+		"resource_name":             settings.ResourceName,
+		"hourly_rate_cents":         settings.HourlyRateCents,
+		"currency":                  settings.Currency,
+		"bookable_start":            settings.BookableStart.Format("15:04"),
+		"bookable_end":              settings.BookableEnd.Format("15:04"),
+		"min_hours":                 settings.MinHours,
+		"max_hours":                 settings.MaxHours,
+		"timezone":                  settings.Timezone,
+		"referral_sources":          settings.ReferralSources,
+		"booking_screening":         rawJSONOrNil(settings.BookingScreening),
+		"min_booking_lead_minutes":  settings.MinBookingLeadMinutes,
 	})
 }
 
@@ -135,8 +139,9 @@ func (s *Server) handleGetAvailability(w http.ResponseWriter, r *http.Request) {
 				break
 			}
 		}
-		// Past slots are not available
-		if t.Before(time.Now()) {
+		// Past slots and slots within lead time are not available
+		leadCutoff := bookingLeadCutoff(settings)
+		if t.Before(leadCutoff) {
 			available = false
 		}
 		slots = append(slots, slot{Start: t, End: slotEnd, Available: available})
@@ -146,6 +151,68 @@ func (s *Server) handleGetAvailability(w http.ResponseWriter, r *http.Request) {
 		"date":      dateStr,
 		"is_closed": false,
 		"slots":     slots,
+	})
+}
+
+func (s *Server) handleCreateInterestSubmission(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Name           string `json:"name"`
+		Email          string `json:"email"`
+		Phone          string `json:"phone"`
+		Message        string `json:"message"`
+		SelectedOption string `json:"selected_option"`
+	}
+	if !s.readJSONRequest(w, r, &req) {
+		return
+	}
+	if req.Name == "" || req.Email == "" || req.SelectedOption == "" {
+		s.writeError(w, r, http.StatusBadRequest, "name, email, and selected_option are required", nil)
+		return
+	}
+
+	var phonePtr, messagePtr *string
+	if req.Phone != "" {
+		phonePtr = &req.Phone
+	}
+	if req.Message != "" {
+		messagePtr = &req.Message
+	}
+
+	submission, err := s.queries.CreateInterestSubmission(r.Context(), req.Name, req.Email, phonePtr, messagePtr, req.SelectedOption)
+	if err != nil {
+		s.writeError(w, r, http.StatusInternalServerError, "failed to save submission", err)
+		return
+	}
+
+	settings, err := s.queries.GetSettings(r.Context())
+	if err != nil {
+		s.logger.Error("interest submission: failed to load settings for email", "submission_id", submission.ID, "error", err)
+	} else if settings.NotificationEmails != "" {
+		go func() {
+			data := emailsvc.InterestSubmissionData{
+				ResourceName:   settings.ResourceName,
+				Name:           submission.Name,
+				Email:          submission.Email,
+				Phone:          derefString(submission.Phone),
+				Message:        derefString(submission.Message),
+				SelectedOption: submission.SelectedOption,
+				SubmittedAt:    submission.CreatedAt,
+				Timezone:       settings.Timezone,
+			}
+			for _, addr := range splitEmails(settings.NotificationEmails) {
+				if err := s.email.SendInterestSubmission(addr, data); err != nil {
+					s.logger.Error("interest submission email failed", "submission_id", submission.ID, "recipient", addr, "error", err)
+				}
+			}
+		}()
+	}
+
+	writeJSON(w, http.StatusCreated, map[string]any{
+		"id":              submission.ID,
+		"name":            submission.Name,
+		"email":           submission.Email,
+		"selected_option": submission.SelectedOption,
+		"created_at":      submission.CreatedAt,
 	})
 }
 
@@ -426,8 +493,9 @@ func bookingWithinBookableHours(start, end time.Time, st *db.Settings, loc *time
 }
 
 func (s *Server) validateBookingCreate(ctx context.Context, start, end time.Time, settings *db.Settings) (badRequest string, err error) {
-	if start.Before(time.Now()) {
-		return "booking start time is in the past", nil
+	leadCutoff := bookingLeadCutoff(settings)
+	if start.Before(leadCutoff) {
+		return formatLeadTimeError(settings.MinBookingLeadMinutes), nil
 	}
 
 	loc, lerr := time.LoadLocation(settings.Timezone)
@@ -463,6 +531,45 @@ func (s *Server) validateBookingCreate(ctx context.Context, start, end time.Time
 		}
 	}
 	return "", nil
+}
+
+func bookingLeadCutoff(settings *db.Settings) time.Time {
+	return time.Now().Add(time.Duration(settings.MinBookingLeadMinutes) * time.Minute)
+}
+
+func formatLeadTimeError(minutes int32) string {
+	if minutes <= 0 {
+		return "booking start time is in the past"
+	}
+	if minutes%60 == 0 {
+		hours := minutes / 60
+		if hours == 1 {
+			return "bookings must be made at least 1 hour in advance"
+		}
+		return fmt.Sprintf("bookings must be made at least %d hours in advance", hours)
+	}
+	if minutes == 1 {
+		return "bookings must be made at least 1 minute in advance"
+	}
+	return fmt.Sprintf("bookings must be made at least %d minutes in advance", minutes)
+}
+
+func rawJSONOrNil(raw *json.RawMessage) any {
+	if raw == nil || len(*raw) == 0 {
+		return nil
+	}
+	var v any
+	if err := json.Unmarshal(*raw, &v); err != nil {
+		return nil
+	}
+	return v
+}
+
+func derefString(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }
 
 // splitEmails parses a comma-separated list of email addresses.

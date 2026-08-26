@@ -4,16 +4,18 @@ import { loadStripe } from '@stripe/stripe-js'
 import { Elements, CardElement, useStripe, useElements } from '@stripe/react-stripe-js'
 import { DatePicker } from '../components/DatePicker'
 import { TimeSlotPicker } from '../components/TimeSlotPicker'
+import { BookingScreening } from '../components/BookingScreening'
 import { Footer } from '../components/Footer'
 import {
   getPublicSettings,
   getAvailability,
   createBooking,
+  createInterestSubmission,
   cancelBooking,
   confirmBookingCard,
   ApiError,
 } from '../lib/api'
-import type { PublicSettings, AvailabilityResponse, BookingPublic } from '../lib/types'
+import type { PublicSettings, AvailabilityResponse, BookingPublic, BookingScreeningOutcome } from '../lib/types'
 
 // Stripe publishable key from env (set in .env or via Vite)
 const stripePromise = loadStripe(import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY ?? '')
@@ -59,6 +61,15 @@ function BookingForm({ settings }: { settings: PublicSettings }) {
   const stripe = useStripe()
   const elements = useElements()
 
+  const screeningEnabled = Boolean(settings.booking_screening?.enabled)
+  const screeningConfig = settings.booking_screening
+
+  type FlowPhase = 'screening' | 'booking' | 'collect_info' | 'interest_submitted'
+  const [phase, setPhase] = useState<FlowPhase>(screeningEnabled ? 'screening' : 'booking')
+  const [selectedScreeningOption, setSelectedScreeningOption] = useState('')
+
+  const stepOffset = screeningEnabled ? 1 : 0
+
   const today = format(new Date(), 'yyyy-MM-dd')
   const [date, setDate] = useState(today)
   const [availability, setAvailability] = useState<AvailabilityResponse | null>(null)
@@ -74,8 +85,39 @@ function BookingForm({ settings }: { settings: PublicSettings }) {
   const [referralSourceOther, setReferralSourceOther] = useState('')
   const [acceptedTerms, setAcceptedTerms] = useState(false)
   const [submitting, setSubmitting] = useState(false)
+  const [submittingInterest, setSubmittingInterest] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [interestError, setInterestError] = useState<string | null>(null)
   const [success, setSuccess] = useState<BookingPublic | null>(null)
+
+  const handleScreeningOutcome = (outcome: BookingScreeningOutcome, selectedLabel: string) => {
+    setSelectedScreeningOption(selectedLabel)
+    if (outcome === 'proceed') {
+      setPhase('booking')
+    } else {
+      setPhase('collect_info')
+    }
+  }
+
+  const handleInterestSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setSubmittingInterest(true)
+    setInterestError(null)
+    try {
+      await createInterestSubmission({
+        name,
+        email,
+        phone: phone || undefined,
+        message: staffNotes || undefined,
+        selected_option: selectedScreeningOption,
+      })
+      setPhase('interest_submitted')
+    } catch (err) {
+      setInterestError(err instanceof ApiError ? err.message : 'Something went wrong')
+    } finally {
+      setSubmittingInterest(false)
+    }
+  }
 
   useEffect(() => {
     setLoadingSlots(true)
@@ -174,12 +216,110 @@ function BookingForm({ settings }: { settings: PublicSettings }) {
     )
   }
 
+  if (phase === 'screening' && screeningConfig) {
+    return (
+      <div className="max-w-2xl mx-auto px-4 py-8">
+        <BookingScreening config={screeningConfig} onOutcome={handleScreeningOutcome} />
+      </div>
+    )
+  }
+
+  if (phase === 'interest_submitted') {
+    return (
+      <div className="max-w-2xl mx-auto px-4 py-12 text-center">
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-8">
+          <div className="w-16 h-16 rounded-full bg-green-100 flex items-center justify-center mx-auto mb-4">
+            <svg className="w-8 h-8 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+            </svg>
+          </div>
+          <h2 className="text-2xl font-bold text-gray-900 mb-2">Thank you!</h2>
+          <p className="text-sm text-gray-500">
+            We've received your information and will be in touch soon.
+          </p>
+        </div>
+      </div>
+    )
+  }
+
+  if (phase === 'collect_info' && screeningConfig) {
+    return (
+      <form onSubmit={handleInterestSubmit} className="max-w-2xl mx-auto px-4 py-8 space-y-6">
+        <section>
+          <h2 className="text-xl font-bold text-gray-900">{screeningConfig.collect_info_heading}</h2>
+          {screeningConfig.collect_info_description && (
+            <p className="text-sm text-gray-500 mt-1">{screeningConfig.collect_info_description}</p>
+          )}
+        </section>
+
+        <div className="bg-white rounded-2xl border border-gray-200 p-6 space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Name</label>
+            <input
+              type="text"
+              required
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              placeholder="Your full name"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
+            <input
+              type="email"
+              required
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              placeholder="you@example.com"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Phone <span className="text-gray-400 font-normal">(optional)</span></label>
+            <input
+              type="tel"
+              value={phone}
+              onChange={(e) => setPhone(e.target.value)}
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              placeholder="(406) 555-0100"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Message <span className="text-gray-400 font-normal">(optional)</span></label>
+            <textarea
+              value={staffNotes}
+              onChange={(e) => setStaffNotes(e.target.value)}
+              rows={3}
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+              placeholder="Anything you'd like us to know…"
+            />
+          </div>
+
+          {interestError && (
+            <div className="rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm px-3 py-2">
+              {interestError}
+            </div>
+          )}
+
+          <button
+            type="submit"
+            disabled={submittingInterest}
+            className="w-full bg-blue-600 text-white rounded-lg py-2.5 font-medium text-sm hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >
+            {submittingInterest ? 'Submitting…' : 'Submit'}
+          </button>
+        </div>
+      </form>
+    )
+  }
+
   return (
     <form onSubmit={handleSubmit} className="max-w-2xl mx-auto px-4 py-8 space-y-8">
       {/* Date selection */}
       <section>
         <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">
-          1. Choose a date
+          {stepOffset + 1}. Choose a date
         </h2>
         <DatePicker selected={date} onChange={setDate} />
       </section>
@@ -187,7 +327,7 @@ function BookingForm({ settings }: { settings: PublicSettings }) {
       {/* Time slot selection */}
       <section>
         <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">
-          2. Choose a time
+          {stepOffset + 2}. Choose a time
         </h2>
         {loadingSlots ? (
           <div className="flex items-center gap-2 text-gray-400 py-4">
@@ -231,7 +371,7 @@ function BookingForm({ settings }: { settings: PublicSettings }) {
       {selectedStart && selectedEnd && (
         <section>
           <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">
-            3. Your details
+            {stepOffset + 3}. Your details
           </h2>
           <div className="bg-white rounded-2xl border border-gray-200 p-6 space-y-4">
             <div>

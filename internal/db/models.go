@@ -4,6 +4,7 @@
 package db
 
 import (
+	"encoding/json"
 	"time"
 
 	"github.com/google/uuid"
@@ -66,8 +67,20 @@ type Settings struct {
 	NotificationEmails       string    `json:"notification_emails"`
 	AutoChargeDelayMinutes   int32     `json:"auto_charge_delay_minutes"`
 	ReferralSources          []string  `json:"referral_sources"`
-	TermsContent             string    `json:"terms_content"`
-	PrivacyContent           string    `json:"privacy_content"`
+	TermsContent             string           `json:"terms_content"`
+	PrivacyContent           string           `json:"privacy_content"`
+	BookingScreening         *json.RawMessage `json:"booking_screening"`
+	MinBookingLeadMinutes    int32            `json:"min_booking_lead_minutes"`
+}
+
+type InterestSubmission struct {
+	ID             int32     `json:"id"`
+	Name           string    `json:"name"`
+	Email          string    `json:"email"`
+	Phone          *string   `json:"phone"`
+	Message        *string   `json:"message"`
+	SelectedOption string    `json:"selected_option"`
+	CreatedAt      time.Time `json:"created_at"`
 }
 
 type AdminUser struct {

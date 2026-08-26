@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8"><title>Interest Submission</title></head>
+<body style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:24px;color:#1a1a1a;">
+  <h1 style="color:#1d4ed8;margin-bottom:4px;">New Interest Submission – {{.ResourceName}}</h1>
+  <p style="color:#6b7280;margin-top:0;">Someone needs outreach before they can book.</p>
+
+  <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:20px;margin:16px 0;">
+    <p style="margin:0 0 8px;"><strong>Name:</strong> {{.Name}}</p>
+    <p style="margin:0 0 8px;"><strong>Email:</strong> {{.Email}}</p>
+    {{if .Phone}}
+    <p style="margin:0 0 8px;"><strong>Phone:</strong> {{.Phone}}</p>
+    {{end}}
+    <p style="margin:0 0 8px;"><strong>Selected option:</strong> {{.SelectedOption}}</p>
+    {{if .Message}}
+    <p style="margin:0 0 8px;"><strong>Message:</strong> {{.Message}}</p>
+    {{end}}
+    <p style="margin:0;"><strong>Submitted:</strong> {{formatTime .SubmittedAt .Timezone}}</p>
+  </div>
+
+  <p style="color:#9ca3af;font-size:12px;border-top:1px solid #e5e7eb;padding-top:16px;">
+    You are receiving this because you are listed as a staff notification contact.
+  </p>
+</body>
+</html>

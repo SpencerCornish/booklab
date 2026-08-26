@@ -57,6 +57,28 @@ paths:
               schema:
                 $ref: "#/components/schemas/LegalContent"
 
+  /interest-submissions:
+    post:
+      tags: [public]
+      summary: Submit interest for outreach
+      description: Saves a contact submission when screening routes the user to collect info instead of booking.
+      operationId: createInterestSubmission
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateInterestSubmissionRequest"
+      responses:
+        "201":
+          description: Submission created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InterestSubmission"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
   /availability:
     get:
       tags: [public]
@@ -649,6 +671,12 @@ components:
           type: array
           items:
             type: string
+        booking_screening:
+          $ref: "#/components/schemas/BookingScreening"
+          nullable: true
+        min_booking_lead_minutes:
+          type: integer
+          description: Minimum minutes before a slot starts that it can be booked. 0 allows booking up to the last minute.
 
     Settings:
       allOf:
@@ -706,6 +734,74 @@ components:
           type: string
         privacy_content:
           type: string
+        booking_screening:
+          $ref: "#/components/schemas/BookingScreening"
+          nullable: true
+        min_booking_lead_minutes:
+          type: integer
+
+    BookingScreening:
+      type: object
+      required: [enabled, title, question, options, collect_info_heading, collect_info_description]
+      properties:
+        enabled:
+          type: boolean
+        title:
+          type: string
+        description:
+          type: string
+        question:
+          type: string
+        options:
+          type: array
+          items:
+            $ref: "#/components/schemas/BookingScreeningOption"
+        collect_info_heading:
+          type: string
+        collect_info_description:
+          type: string
+
+    BookingScreeningOption:
+      type: object
+      required: [label, outcome]
+      properties:
+        label:
+          type: string
+        outcome:
+          type: string
+          enum: [proceed, collect_info]
+
+    CreateInterestSubmissionRequest:
+      type: object
+      required: [name, email, selected_option]
+      properties:
+        name:
+          type: string
+        email:
+          type: string
+          format: email
+        phone:
+          type: string
+        message:
+          type: string
+        selected_option:
+          type: string
+
+    InterestSubmission:
+      type: object
+      required: [id, name, email, selected_option, created_at]
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        email:
+          type: string
+        selected_option:
+          type: string
+        created_at:
+          type: string
+          format: date-time
 
     AvailabilityResponse:
       type: object

@@ -531,8 +531,10 @@ func (s *Server) handleAdminUpdateSettings(w http.ResponseWriter, r *http.Reques
 		NotificationEmails       *string   `json:"notification_emails"`
 		AutoChargeDelayMinutes   *int32    `json:"auto_charge_delay_minutes"`
 		ReferralSources          *[]string `json:"referral_sources"`
-		TermsContent             *string   `json:"terms_content"`
-		PrivacyContent           *string   `json:"privacy_content"`
+		TermsContent             *string          `json:"terms_content"`
+		PrivacyContent           *string          `json:"privacy_content"`
+		BookingScreening         json.RawMessage  `json:"booking_screening"`
+		MinBookingLeadMinutes    *int32           `json:"min_booking_lead_minutes"`
 	}
 	if !s.readJSONRequest(w, r, &req) {
 		return
@@ -551,6 +553,11 @@ func (s *Server) handleAdminUpdateSettings(w http.ResponseWriter, r *http.Reques
 		ReferralSources:          req.ReferralSources,
 		TermsContent:             req.TermsContent,
 		PrivacyContent:           req.PrivacyContent,
+		MinBookingLeadMinutes:    req.MinBookingLeadMinutes,
+	}
+	if len(req.BookingScreening) > 0 {
+		raw := json.RawMessage(req.BookingScreening)
+		params.BookingScreening = &raw
 	}
 
 	if req.BookableStart != nil {
@@ -698,6 +705,8 @@ func settingsToMap(s *db.Settings) map[string]any {
 		"referral_sources":           s.ReferralSources,
 		"terms_content":              s.TermsContent,
 		"privacy_content":            s.PrivacyContent,
+		"booking_screening":          rawJSONOrNil(s.BookingScreening),
+		"min_booking_lead_minutes":   s.MinBookingLeadMinutes,
 	}
 }
 

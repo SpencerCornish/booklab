@@ -49,7 +49,7 @@ func TestAdminChargeBooking_idempotentSecondRequest(t *testing.T) {
 	// Completed booking eligible for charge
 	start := time.Date(2031, 3, 1, 12, 0, 0, 0, time.UTC)
 	end := start.Add(2 * time.Hour)
-	b, err := q.CreateBooking(ctx, "Pat", "pat@example.com", start, end, "si_x")
+	b, err := q.CreateBooking(ctx, "Pat", "pat@example.com", map[string]string{}, start, end, "si_x")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -28,7 +29,8 @@ func New(pool *pgxpool.Pool) *Queries {
 func (q *Queries) GetSettings(ctx context.Context) (*Settings, error) {
 	row := q.pool.QueryRow(ctx, `SELECT id, resource_name, hourly_rate_cents, currency, timezone,
 		bookable_start, bookable_end, min_hours, max_hours, reminder_hours_before, notification_emails,
-		auto_charge_delay_minutes, referral_sources, terms_content, privacy_content
+		auto_charge_delay_minutes, referral_sources, terms_content, privacy_content,
+		booking_screening, min_booking_lead_minutes
 		FROM settings WHERE id = 1`)
 	return scanSettings(row)
 }
@@ -48,6 +50,8 @@ type UpdateSettingsParams struct {
 	ReferralSources          *[]string
 	TermsContent             *string
 	PrivacyContent           *string
+	BookingScreening         *json.RawMessage
+	MinBookingLeadMinutes    *int32
 }
 
 func (q *Queries) UpdateSettings(ctx context.Context, p UpdateSettingsParams) (*Settings, error) {
@@ -66,16 +70,18 @@ func (q *Queries) UpdateSettings(ctx context.Context, p UpdateSettingsParams) (*
 			auto_charge_delay_minutes   = COALESCE($11, auto_charge_delay_minutes),
 			referral_sources            = COALESCE($12, referral_sources),
 			terms_content               = COALESCE($13, terms_content),
-			privacy_content             = COALESCE($14, privacy_content)
+			privacy_content             = COALESCE($14, privacy_content),
+			booking_screening           = COALESCE($15, booking_screening),
+			min_booking_lead_minutes    = COALESCE($16, min_booking_lead_minutes)
 		WHERE id = 1
 		RETURNING id, resource_name, hourly_rate_cents, currency, timezone,
 			bookable_start, bookable_end, min_hours, max_hours, reminder_hours_before,
 			notification_emails, auto_charge_delay_minutes, referral_sources,
-			terms_content, privacy_content`,
+			terms_content, privacy_content, booking_screening, min_booking_lead_minutes`,
 		p.ResourceName, p.HourlyRateCents, p.Currency, p.Timezone,
 		p.BookableStart, p.BookableEnd, p.MinHours, p.MaxHours, p.ReminderHoursBefore,
 		p.NotificationEmails, p.AutoChargeDelayMinutes, p.ReferralSources,
-		p.TermsContent, p.PrivacyContent,
+		p.TermsContent, p.PrivacyContent, p.BookingScreening, p.MinBookingLeadMinutes,
 	)
 	return scanSettings(row)
 }
@@ -86,7 +92,7 @@ func scanSettings(row pgx.Row) (*Settings, error) {
 		&s.ID, &s.ResourceName, &s.HourlyRateCents, &s.Currency, &s.Timezone,
 		&s.BookableStart, &s.BookableEnd, &s.MinHours, &s.MaxHours, &s.ReminderHoursBefore,
 		&s.NotificationEmails, &s.AutoChargeDelayMinutes, &s.ReferralSources,
-		&s.TermsContent, &s.PrivacyContent,
+		&s.TermsContent, &s.PrivacyContent, &s.BookingScreening, &s.MinBookingLeadMinutes,
 	)
 	if err != nil {
 		return nil, err
@@ -737,4 +743,46 @@ func (q *Queries) GetBookingInsights(ctx context.Context) (*BookingInsights, err
 	}
 
 	return insights, nil
+}
+
+// ----- Interest submissions -----
+
+func (q *Queries) CreateInterestSubmission(ctx context.Context, name, email string, phone, message *string, selectedOption string) (*InterestSubmission, error) {
+	row := q.pool.QueryRow(ctx, `
+		INSERT INTO interest_submissions (name, email, phone, message, selected_option)
+		VALUES ($1, $2, $3, $4, $5)
+		RETURNING id, name, email, phone, message, selected_option, created_at`,
+		name, email, phone, message, selectedOption,
+	)
+	return scanInterestSubmission(row)
+}
+
+func (q *Queries) ListInterestSubmissions(ctx context.Context) ([]*InterestSubmission, error) {
+	rows, err := q.pool.Query(ctx, `
+		SELECT id, name, email, phone, message, selected_option, created_at
+		FROM interest_submissions
+		ORDER BY created_at DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var submissions []*InterestSubmission
+	for rows.Next() {
+		sub, err := scanInterestSubmission(rows)
+		if err != nil {
+			return nil, err
+		}
+		submissions = append(submissions, sub)
+	}
+	return submissions, rows.Err()
+}
+
+func scanInterestSubmission(row pgx.Row) (*InterestSubmission, error) {
+	var s InterestSubmission
+	err := row.Scan(&s.ID, &s.Name, &s.Email, &s.Phone, &s.Message, &s.SelectedOption, &s.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+	return &s, nil
 }

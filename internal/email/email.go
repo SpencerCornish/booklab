@@ -144,6 +144,17 @@ type StaffChargeFailureData struct {
 	Timezone       string
 }
 
+type InterestSubmissionData struct {
+	ResourceName   string
+	Name           string
+	Email          string
+	Phone          string
+	Message        string
+	SelectedOption string
+	SubmittedAt    time.Time
+	Timezone       string
+}
+
 func (s *Service) SendConfirmation(to string, data ConfirmationData) error {
 	return s.send(to, fmt.Sprintf("Booking Confirmed – %s", data.ResourceName), "confirmation.html", data)
 }
@@ -174,6 +185,10 @@ func (s *Service) SendStaffCompletion(to string, data StaffCompletionData) error
 
 func (s *Service) SendStaffChargeFailure(to string, data StaffChargeFailureData) error {
 	return s.send(to, fmt.Sprintf("⚠️ Charge Failed – %s – %s", data.BookerName, data.ResourceName), "staff_charge_failure.html", data)
+}
+
+func (s *Service) SendInterestSubmission(to string, data InterestSubmissionData) error {
+	return s.send(to, fmt.Sprintf("Interest Submission – %s – %s", data.Name, data.ResourceName), "interest_submission.html", data)
 }
 
 func (s *Service) send(to, subject, tmplName string, data any) error {

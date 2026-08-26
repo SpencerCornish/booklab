@@ -1,5 +1,22 @@
 export type BookingStatus = 'confirmed' | 'cancelled' | 'completed' | 'charging' | 'charged'
 
+export type BookingScreeningOutcome = 'proceed' | 'collect_info'
+
+export interface BookingScreeningOption {
+  label: string
+  outcome: BookingScreeningOutcome
+}
+
+export interface BookingScreening {
+  enabled: boolean
+  title: string
+  description: string
+  question: string
+  options: BookingScreeningOption[]
+  collect_info_heading: string
+  collect_info_description: string
+}
+
 export interface PublicSettings {
   resource_name: string
   hourly_rate_cents: number
@@ -10,6 +27,8 @@ export interface PublicSettings {
   max_hours: number
   timezone: string
   referral_sources: string[]
+  booking_screening?: BookingScreening | null
+  min_booking_lead_minutes: number
 }
 
 export interface Settings extends PublicSettings {

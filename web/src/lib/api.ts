@@ -77,6 +77,18 @@ export const cancelBooking = (token: string) =>
 export const confirmBookingCard = (token: string) =>
   request<void>(`/bookings/${token}/confirm-card`, { method: 'POST' })
 
+export const createInterestSubmission = (body: {
+  name: string
+  email: string
+  phone?: string
+  message?: string
+  selected_option: string
+}) =>
+  request<{ id: number }>('/interest-submissions', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  })
+
 // Admin
 export const adminLogin = (username: string, password: string) =>
   request<{ status: string }>('/admin/login', {
