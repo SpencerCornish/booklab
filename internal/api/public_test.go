@@ -195,7 +195,7 @@ func TestPrepareBooking_returnsSetupIntent(t *testing.T) {
 		t.Fatalf("status %d want 200 body %s", resp.StatusCode, b)
 	}
 	var body struct {
-		SetupIntentID          string `json:"setup_intent_id"`
+		SetupIntentID           string `json:"setup_intent_id"`
 		SetupIntentClientSecret string `json:"setup_intent_client_secret"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
