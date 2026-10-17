@@ -1,5 +1,11 @@
 export type BookingStatus = 'confirmed' | 'cancelled' | 'completed' | 'charging' | 'charged'
 
+export interface NewCustomerRestriction {
+  start_date: string
+  end_date: string
+  message: string
+}
+
 export interface PublicSettings {
   resource_name: string
   hourly_rate_cents: number
@@ -8,8 +14,10 @@ export interface PublicSettings {
   bookable_end: string
   min_hours: number
   max_hours: number
+  min_lead_hours: number
   timezone: string
   referral_sources: string[]
+  new_customer_restriction?: NewCustomerRestriction | null
 }
 
 export interface Settings extends PublicSettings {

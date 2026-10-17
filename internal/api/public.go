@@ -21,16 +21,29 @@ func (s *Server) handleGetPublicSettings(w http.ResponseWriter, r *http.Request)
 		s.writeError(w, r, http.StatusInternalServerError, "failed to load settings", err)
 		return
 	}
+	// The restriction is only advertised while its end date has not passed, so the
+	// booking page stops showing the notice once the window is over.
+	var restriction any
+	if _, windowEnd, ok := newCustomerWindow(settings, settingsLocation(settings)); ok && time.Now().Before(windowEnd) {
+		restriction = map[string]any{
+			"start_date": settings.NewCustomerBlockStart.Format("2006-01-02"),
+			"end_date":   settings.NewCustomerBlockEnd.Format("2006-01-02"),
+			"message":    newCustomerMessage(settings),
+		}
+	}
+
 	writeJSON(w, http.StatusOK, map[string]any{
-		"resource_name":     settings.ResourceName,
-		"hourly_rate_cents": settings.HourlyRateCents,
-		"currency":          settings.Currency,
-		"bookable_start":    settings.BookableStart.Format("15:04"),
-		"bookable_end":      settings.BookableEnd.Format("15:04"),
-		"min_hours":         settings.MinHours,
-		"max_hours":         settings.MaxHours,
-		"timezone":          settings.Timezone,
-		"referral_sources":  settings.ReferralSources,
+		"resource_name":            settings.ResourceName,
+		"hourly_rate_cents":        settings.HourlyRateCents,
+		"currency":                 settings.Currency,
+		"bookable_start":           settings.BookableStart.Format("15:04"),
+		"bookable_end":             settings.BookableEnd.Format("15:04"),
+		"min_hours":                settings.MinHours,
+		"max_hours":                settings.MaxHours,
+		"min_lead_hours":           settings.MinLeadHours,
+		"timezone":                 settings.Timezone,
+		"referral_sources":         settings.ReferralSources,
+		"new_customer_restriction": restriction,
 	})
 }
 
@@ -119,6 +132,7 @@ func (s *Server) handleGetAvailability(w http.ResponseWriter, r *http.Request) {
 		Available bool      `json:"available"`
 	}
 
+	earliest := earliestBookableStart(settings)
 	var slots []slot
 	for t := dayStart; t.Before(dayEnd); t = t.Add(time.Hour) {
 		slotEnd := t.Add(time.Hour)
@@ -136,8 +150,8 @@ func (s *Server) handleGetAvailability(w http.ResponseWriter, r *http.Request) {
 				break
 			}
 		}
-		// Past slots are not available
-		if t.Before(time.Now()) {
+		// Past slots, and slots inside the minimum notice period, are not available
+		if t.Before(earliest) {
 			available = false
 		}
 		slots = append(slots, slot{Start: t, End: slotEnd, Available: available})
@@ -179,6 +193,14 @@ func (s *Server) handlePrepareBooking(w http.ResponseWriter, r *http.Request) {
 		return
 	} else if badReq != "" {
 		s.writeError(w, r, http.StatusBadRequest, badReq, nil)
+		return
+	}
+
+	if blocked, err := s.checkNewCustomerRestriction(r.Context(), req.Email, req.StartTime, req.EndTime, settings); err != nil {
+		s.writeError(w, r, http.StatusInternalServerError, "failed to check booking restriction", err)
+		return
+	} else if blocked != "" {
+		s.writeError(w, r, http.StatusForbidden, blocked, nil)
 		return
 	}
 
@@ -254,6 +276,14 @@ func (s *Server) handleCreateBooking(w http.ResponseWriter, r *http.Request) {
 		return
 	} else if badReq != "" {
 		s.writeError(w, r, http.StatusBadRequest, badReq, nil)
+		return
+	}
+
+	if blocked, err := s.checkNewCustomerRestriction(r.Context(), req.Email, req.StartTime, req.EndTime, settings); err != nil {
+		s.writeError(w, r, http.StatusInternalServerError, "failed to check booking restriction", err)
+		return
+	} else if blocked != "" {
+		s.writeError(w, r, http.StatusForbidden, blocked, nil)
 		return
 	}
 
@@ -385,16 +415,16 @@ func (s *Server) handleCancelBooking(w http.ResponseWriter, r *http.Request) {
 			}()
 
 			if settings.NotificationEmails != "" {
-			staffData := emailsvc.StaffCancellationData{
-				ResourceName: settings.ResourceName,
-				BookerName:   booking.Name,
-				BookerEmail:  booking.Email,
-				Metadata:     booking.Metadata,
-				StartTime:    booking.StartTime,
-				EndTime:      booking.EndTime,
-				AdminURL:     s.cfg.AppURL + "/admin/bookings",
-				Timezone:     settings.Timezone,
-			}
+				staffData := emailsvc.StaffCancellationData{
+					ResourceName: settings.ResourceName,
+					BookerName:   booking.Name,
+					BookerEmail:  booking.Email,
+					Metadata:     booking.Metadata,
+					StartTime:    booking.StartTime,
+					EndTime:      booking.EndTime,
+					AdminURL:     s.cfg.AppURL + "/admin/bookings",
+					Timezone:     settings.Timezone,
+				}
 				for _, addr := range splitEmails(settings.NotificationEmails) {
 					addr := addr
 					go func() {
@@ -454,9 +484,22 @@ func bookingWithinBookableHours(start, end time.Time, st *db.Settings, loc *time
 	return true
 }
 
+// earliestBookableStart is the earliest start time a new booking may have,
+// given the minimum notice period in settings.
+func earliestBookableStart(settings *db.Settings) time.Time {
+	return time.Now().Add(time.Duration(settings.MinLeadHours) * time.Hour)
+}
+
 func (s *Server) validateBookingCreate(ctx context.Context, start, end time.Time, settings *db.Settings) (badRequest string, err error) {
 	if start.Before(time.Now()) {
 		return "booking start time is in the past", nil
+	}
+	if start.Before(earliestBookableStart(settings)) {
+		unit := "hours"
+		if settings.MinLeadHours == 1 {
+			unit = "hour"
+		}
+		return fmt.Sprintf("bookings must be made at least %d %s in advance", settings.MinLeadHours, unit), nil
 	}
 
 	loc, lerr := time.LoadLocation(settings.Timezone)
@@ -492,6 +535,58 @@ func (s *Server) validateBookingCreate(ctx context.Context, start, end time.Time
 		}
 	}
 	return "", nil
+}
+
+// settingsLocation returns the configured booking timezone, falling back to UTC.
+func settingsLocation(settings *db.Settings) *time.Location {
+	loc, err := time.LoadLocation(settings.Timezone)
+	if err != nil {
+		return time.UTC
+	}
+	return loc
+}
+
+// newCustomerWindow returns the new-customer restriction as the half-open interval
+// [start, end) in loc, covering whole days from the start date through the end date.
+// ok is false when no window is configured.
+func newCustomerWindow(settings *db.Settings, loc *time.Location) (start, end time.Time, ok bool) {
+	if settings.NewCustomerBlockStart == nil || settings.NewCustomerBlockEnd == nil {
+		return time.Time{}, time.Time{}, false
+	}
+	s := *settings.NewCustomerBlockStart
+	e := *settings.NewCustomerBlockEnd
+	start = time.Date(s.Year(), s.Month(), s.Day(), 0, 0, 0, 0, loc)
+	end = time.Date(e.Year(), e.Month(), e.Day()+1, 0, 0, 0, 0, loc)
+	return start, end, true
+}
+
+// newCustomerMessage returns the admin's message, or a default built from the window dates.
+// Only call it when a window is configured.
+func newCustomerMessage(settings *db.Settings) string {
+	if settings.NewCustomerBlockMessage != "" {
+		return settings.NewCustomerBlockMessage
+	}
+	return fmt.Sprintf("We're only accepting returning customers between %s and %s.",
+		settings.NewCustomerBlockStart.Format("January 2, 2006"),
+		settings.NewCustomerBlockEnd.Format("January 2, 2006"))
+}
+
+// checkNewCustomerRestriction returns the restriction message when the session overlaps
+// the new-customer window and the email has no completed booking. An empty string means
+// the booking may proceed.
+func (s *Server) checkNewCustomerRestriction(ctx context.Context, email string, start, end time.Time, settings *db.Settings) (string, error) {
+	windowStart, windowEnd, ok := newCustomerWindow(settings, settingsLocation(settings))
+	if !ok || !start.Before(windowEnd) || !end.After(windowStart) {
+		return "", nil
+	}
+	returning, err := s.queries.HasCompletedBooking(ctx, email)
+	if err != nil {
+		return "", err
+	}
+	if returning {
+		return "", nil
+	}
+	return newCustomerMessage(settings), nil
 }
 
 // splitEmails parses a comma-separated list of email addresses.

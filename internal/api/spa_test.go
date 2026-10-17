@@ -13,9 +13,9 @@ import (
 func testWebFS(t *testing.T) fs.FS {
 	t.Helper()
 	return fstest.MapFS{
-		"index.html":              {Data: []byte("<html>app</html>")},
-		"assets/app.js":           {Data: []byte("console.log('hi')")},
-		"favicon.svg":             {Data: []byte("<svg/>")},
+		"index.html":    {Data: []byte("<html>app</html>")},
+		"assets/app.js": {Data: []byte("console.log('hi')")},
+		"favicon.svg":   {Data: []byte("<svg/>")},
 	}
 }
 

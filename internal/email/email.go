@@ -240,7 +240,6 @@ func (s *Service) sendMail(addr string, auth smtp.Auth, from string, to []string
 	return smtp.SendMail(addr, auth, from, to, msg)
 }
 
-
 // envelopeAddr extracts the bare email address from a From value that may
 // include a display name (e.g. "BookLab <noreply@example.com>"). The SMTP
 // MAIL FROM command accepts only a bare address; display names are only valid

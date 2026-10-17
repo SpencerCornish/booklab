@@ -93,8 +93,8 @@ func TestAutoCharge_completed_concurrentOnlyOneCharge(t *testing.T) {
 	}
 
 	st := &countingStripe{}
-	emailSvc := emailsvc.New("127.0.0.1", 1025, "", "", "sched@localhost", slog.New(slog.DiscardHandler()))
-	s := New(q, emailSvc, st, "http://127.0.0.1:8080", slog.New(slog.DiscardHandler()))
+	emailSvc := emailsvc.New("127.0.0.1", 1025, "", "", "sched@localhost", slog.New(slog.DiscardHandler))
+	s := New(q, emailSvc, st, "http://127.0.0.1:8080", slog.New(slog.DiscardHandler))
 
 	settings, err := q.GetSettings(ctx)
 	if err != nil {

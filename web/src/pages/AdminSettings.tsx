@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { adminGetSettings, adminUpdateSettings, ApiError } from '../lib/api'
-import type { Settings } from '../lib/types'
+import type { NewCustomerRestriction, Settings } from '../lib/types'
 import { RichTextEditor } from '../components/RichTextEditor'
 
 export default function AdminSettings() {
@@ -23,11 +23,22 @@ export default function AdminSettings() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    setSaving(true)
     setError(null)
     setSaved(false)
+
+    // Blank dates mean "no restriction"; one date without the other is incomplete.
+    const r = form.new_customer_restriction
+    let payload = form
+    if (r && !r.start_date && !r.end_date) {
+      payload = { ...form, new_customer_restriction: null }
+    } else if (r && (!r.start_date || !r.end_date)) {
+      setError('Set both new customer restriction dates, or clear the restriction.')
+      return
+    }
+
+    setSaving(true)
     try {
-      const updated = await adminUpdateSettings(form)
+      const updated = await adminUpdateSettings(payload)
       setSettings(updated)
       setForm(updated)
       setSaved(true)
@@ -50,6 +61,14 @@ export default function AdminSettings() {
     onChange: (e: React.ChangeEvent<HTMLInputElement>) =>
       setForm((prev) => ({ ...prev, [key]: parseInt(e.target.value) })),
   })
+
+  const restriction = form.new_customer_restriction ?? null
+
+  const updateRestriction = (patch: Partial<NewCustomerRestriction>) =>
+    setForm((prev) => ({
+      ...prev,
+      new_customer_restriction: { start_date: '', end_date: '', message: '', ...prev.new_customer_restriction, ...patch },
+    }))
 
   if (loading || !settings) {
     return (
@@ -101,6 +120,58 @@ export default function AdminSettings() {
               <Field label="Max hours">
                 <input type="number" min="1" required className={inputClass} {...numberField('max_hours')} />
               </Field>
+            </div>
+            <Field label="Minimum notice (hours)" hint="Bookings must start at least this many hours from now. 0 allows booking right up to the start time.">
+              <input type="number" min="0" required className={inputClass} {...numberField('min_lead_hours')} />
+            </Field>
+          </div>
+        </section>
+
+        <section>
+          <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">New customer restriction</h2>
+          <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <Field label="Start date">
+                <input
+                  type="date"
+                  className={inputClass}
+                  value={restriction?.start_date ?? ''}
+                  onChange={(e) => updateRestriction({ start_date: e.target.value })}
+                />
+              </Field>
+              <Field label="End date">
+                <input
+                  type="date"
+                  className={inputClass}
+                  value={restriction?.end_date ?? ''}
+                  onChange={(e) => updateRestriction({ end_date: e.target.value })}
+                />
+              </Field>
+            </div>
+            <Field
+              label="Message"
+              hint="Shown to new customers in a popup on the booking page, and as the error when they try to book these dates. Leave empty for a default message."
+            >
+              <textarea
+                rows={3}
+                value={restriction?.message ?? ''}
+                onChange={(e) => updateRestriction({ message: e.target.value })}
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+                placeholder="We're only accepting returning customers during these dates."
+              />
+            </Field>
+            <div className="flex items-start justify-between gap-3">
+              <p className="text-xs text-gray-400">
+                Returning customers (with a past completed booking) can still book these dates.
+              </p>
+              <button
+                type="button"
+                onClick={() => setForm((prev) => ({ ...prev, new_customer_restriction: null }))}
+                disabled={!restriction}
+                className="shrink-0 text-sm text-red-600 hover:text-red-800 disabled:opacity-40"
+              >
+                Clear
+              </button>
             </div>
           </div>
         </section>

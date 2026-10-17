@@ -85,7 +85,7 @@ paths:
     post:
       tags: [public]
       summary: Prepare Stripe SetupIntent for a booking
-      description: Validates slot availability and returns a Stripe SetupIntent client secret. Does not create a booking row.
+      description: Validates slot availability and returns a Stripe SetupIntent client secret. Does not create a booking row. While a new-customer restriction covers the session dates, customers with no completed booking get 403.
       operationId: prepareBooking
       requestBody:
         required: true
@@ -102,6 +102,12 @@ paths:
                 $ref: "#/components/schemas/PrepareBookingResponse"
         "400":
           $ref: "#/components/responses/BadRequest"
+        "403":
+          description: New-customer restriction applies to this session and the email has no completed booking. The error message is the admin's restriction message.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
         "409":
           description: Time slot conflict
           content:
@@ -130,6 +136,12 @@ paths:
                 $ref: "#/components/schemas/CreateBookingResponse"
         "400":
           $ref: "#/components/responses/BadRequest"
+        "403":
+          description: New-customer restriction applies to this session and the email has no completed booking. The error message is the admin's restriction message.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
         "409":
           description: Time slot conflict
           content:
@@ -671,12 +683,36 @@ components:
           type: integer
         max_hours:
           type: integer
+        min_lead_hours:
+          type: integer
+          description: Bookings must start at least this many hours from now. 0 means no notice is required.
         timezone:
           type: string
         referral_sources:
           type: array
           items:
             type: string
+        new_customer_restriction:
+          description: Present only while the window is set and its end date has not passed. The message is the admin's text, or a default built from the dates when blank.
+          oneOf:
+            - $ref: "#/components/schemas/NewCustomerRestriction"
+            - type: "null"
+
+    NewCustomerRestriction:
+      type: object
+      required: [start_date, end_date, message]
+      properties:
+        start_date:
+          type: string
+          format: date
+          example: "2035-06-01"
+        end_date:
+          type: string
+          format: date
+          description: Inclusive. The window covers whole days in the settings timezone.
+          example: "2035-06-30"
+        message:
+          type: string
 
     Settings:
       allOf:
@@ -693,6 +729,11 @@ components:
               type: string
             privacy_content:
               type: string
+            new_customer_restriction:
+              description: The configured window, or null when unset. The message is returned as stored, so it may be empty.
+              oneOf:
+                - $ref: "#/components/schemas/NewCustomerRestriction"
+                - type: "null"
 
     LegalContent:
       type: object
@@ -720,6 +761,9 @@ components:
           type: integer
         max_hours:
           type: integer
+        min_lead_hours:
+          type: integer
+          minimum: 0
         reminder_hours_before:
           type: integer
         notification_emails:
@@ -734,6 +778,11 @@ components:
           type: string
         privacy_content:
           type: string
+        new_customer_restriction:
+          description: Omit to leave the window unchanged. Send null to clear it. end_date must be on or after start_date.
+          oneOf:
+            - $ref: "#/components/schemas/NewCustomerRestriction"
+            - type: "null"
 
     AvailabilityResponse:
       type: object
