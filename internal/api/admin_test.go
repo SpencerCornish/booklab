@@ -409,6 +409,15 @@ func TestAdminSettings_newCustomerRestriction(t *testing.T) {
 		}
 	}
 
+	// Both dates blank (the admin form's empty state) clears the window like null does.
+	status, body = put(`{"new_customer_restriction":{"start_date":"","end_date":"","message":"Closed"}}`)
+	if status != http.StatusOK || body["new_customer_restriction"] != nil {
+		t.Fatalf("blank dates: status %d restriction %v, want 200 and null", status, body["new_customer_restriction"])
+	}
+
+	if status, body := put(`{"new_customer_restriction":{"start_date":"2035-06-01","end_date":"2035-06-30","message":"Closed"}}`); status != http.StatusOK {
+		t.Fatalf("re-set window: status %d body %v", status, body)
+	}
 	status, body = put(`{"new_customer_restriction":null}`)
 	if status != http.StatusOK {
 		t.Fatalf("clear: status %d body %v", status, body)

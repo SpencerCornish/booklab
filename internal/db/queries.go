@@ -349,7 +349,7 @@ func (q *Queries) CountPriorBookings(ctx context.Context, email string, excludeI
 func (q *Queries) HasCompletedBooking(ctx context.Context, email string) (bool, error) {
 	var exists bool
 	err := q.pool.QueryRow(ctx,
-		`SELECT EXISTS(SELECT 1 FROM bookings WHERE lower(email) = lower($1) AND status IN ('completed', 'charging', 'charged'))`,
+		`SELECT EXISTS(SELECT 1 FROM bookings WHERE lower(trim(email)) = lower(trim($1)) AND status IN ('completed', 'charging', 'charged'))`,
 		email,
 	).Scan(&exists)
 	return exists, err

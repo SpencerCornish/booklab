@@ -743,8 +743,8 @@ func newCustomerRestrictionToMap(s *db.Settings) map[string]any {
 }
 
 // parseNewCustomerRestriction decodes the admin payload for the new-customer window.
-// A JSON null clears the window and returns nil dates. badRequest is non-empty when the
-// payload is invalid.
+// A JSON null, or an object with both dates blank, clears the window and returns nil
+// dates. badRequest is non-empty when the payload is invalid.
 func parseNewCustomerRestriction(raw json.RawMessage) (start, end *time.Time, message string, badRequest string, err error) {
 	if string(raw) == "null" {
 		return nil, nil, "", "", nil
@@ -756,6 +756,10 @@ func parseNewCustomerRestriction(raw json.RawMessage) (start, end *time.Time, me
 	}
 	if err := json.Unmarshal(raw, &in); err != nil {
 		return nil, nil, "", "invalid new_customer_restriction object", err
+	}
+	// Both dates left blank in the admin form means "no window", same as null.
+	if strings.TrimSpace(in.StartDate) == "" && strings.TrimSpace(in.EndDate) == "" {
+		return nil, nil, "", "", nil
 	}
 	s, err := time.Parse("2006-01-02", in.StartDate)
 	if err != nil {

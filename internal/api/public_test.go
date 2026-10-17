@@ -410,9 +410,9 @@ func TestNewCustomerRestriction_returningCustomerAllowed(t *testing.T) {
 	setNewCustomerWindow(t, ctx, q, dateAt(2035, 6, 1), dateAt(2035, 6, 30), "Closed")
 	ts := newCustomerTestServer(t, q)
 
-	// Email match is case-insensitive; a completed booking in the past unlocks the window.
+	// Email match ignores case and surrounding whitespace; a completed booking in the past unlocks the window.
 	past := time.Date(2031, 3, 1, 12, 0, 0, 0, time.UTC)
-	b, err := q.CreateBooking(ctx, "Pat", "Pat@Example.com", nil, past, past.Add(2*time.Hour), "si_past", "pm_test_123")
+	b, err := q.CreateBooking(ctx, "Pat", " Pat@Example.com ", nil, past, past.Add(2*time.Hour), "si_past", "pm_test_123")
 	if err != nil {
 		t.Fatal(err)
 	}

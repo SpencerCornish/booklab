@@ -23,11 +23,22 @@ export default function AdminSettings() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    setSaving(true)
     setError(null)
     setSaved(false)
+
+    // Blank dates mean "no restriction"; one date without the other is incomplete.
+    const r = form.new_customer_restriction
+    let payload = form
+    if (r && !r.start_date && !r.end_date) {
+      payload = { ...form, new_customer_restriction: null }
+    } else if (r && (!r.start_date || !r.end_date)) {
+      setError('Set both new customer restriction dates, or clear the restriction.')
+      return
+    }
+
+    setSaving(true)
     try {
-      const updated = await adminUpdateSettings(form)
+      const updated = await adminUpdateSettings(payload)
       setSettings(updated)
       setForm(updated)
       setSaved(true)

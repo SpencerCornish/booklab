@@ -69,7 +69,7 @@ function NewCustomerNotice({ restriction }: { restriction: NewCustomerRestrictio
     }
   })
 
-  if (!open) return null
+  const buttonRef = useRef<HTMLButtonElement>(null)
 
   const dismiss = () => {
     try {
@@ -79,6 +79,28 @@ function NewCustomerNotice({ restriction }: { restriction: NewCustomerRestrictio
     }
     setOpen(false)
   }
+
+  // Move focus into the dialog, keep it there (the button is its only control), and close on Escape.
+  useEffect(() => {
+    if (!open) return
+    const previous = document.activeElement as HTMLElement | null
+    buttonRef.current?.focus()
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        dismiss()
+      } else if (e.key === 'Tab') {
+        e.preventDefault()
+        buttonRef.current?.focus()
+      }
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('keydown', onKeyDown)
+      previous?.focus()
+    }
+  }, [open])
+
+  if (!open) return null
 
   const formatDate = (iso: string) => format(parseISO(iso), 'MMMM d, yyyy')
 
@@ -98,6 +120,7 @@ function NewCustomerNotice({ restriction }: { restriction: NewCustomerRestrictio
           Dates: {formatDate(restriction.start_date)} – {formatDate(restriction.end_date)}
         </p>
         <button
+          ref={buttonRef}
           type="button"
           onClick={dismiss}
           className="mt-5 w-full bg-blue-600 text-white rounded-lg py-2.5 font-medium text-sm hover:bg-blue-700 transition-colors"

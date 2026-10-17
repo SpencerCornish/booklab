@@ -55,6 +55,6 @@ UPDATE bookings SET status = 'cancelled' WHERE cancel_token = $1 AND status = 'c
 -- name: HasCompletedBooking :one
 SELECT EXISTS(
     SELECT 1 FROM bookings
-    WHERE lower(email) = lower($1)
+    WHERE lower(trim(email)) = lower(trim($1))
       AND status IN ('completed', 'charging', 'charged')
 );
