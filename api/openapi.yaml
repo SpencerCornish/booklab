@@ -683,6 +683,9 @@ components:
           type: integer
         max_hours:
           type: integer
+        min_lead_hours:
+          type: integer
+          description: Bookings must start at least this many hours from now. 0 means no notice is required.
         timezone:
           type: string
         referral_sources:
@@ -758,6 +761,9 @@ components:
           type: integer
         max_hours:
           type: integer
+        min_lead_hours:
+          type: integer
+          minimum: 0
         reminder_hours_before:
           type: integer
         notification_emails:

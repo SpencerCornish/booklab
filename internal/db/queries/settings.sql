@@ -12,6 +12,7 @@ UPDATE settings SET
     min_hours                   = COALESCE(sqlc.narg('min_hours'), min_hours),
     max_hours                   = COALESCE(sqlc.narg('max_hours'), max_hours),
     reminder_hours_before       = COALESCE(sqlc.narg('reminder_hours_before'), reminder_hours_before),
+    min_lead_hours              = COALESCE(sqlc.narg('min_lead_hours'), min_lead_hours),
     new_customer_block_start    = CASE WHEN sqlc.arg('new_customer_block_set')::bool THEN sqlc.narg('new_customer_block_start') ELSE new_customer_block_start END,
     new_customer_block_end      = CASE WHEN sqlc.arg('new_customer_block_set')::bool THEN sqlc.narg('new_customer_block_end') ELSE new_customer_block_end END,
     new_customer_block_message  = COALESCE(sqlc.narg('new_customer_block_message'), new_customer_block_message)

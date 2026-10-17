@@ -40,6 +40,7 @@ func (s *Server) handleGetPublicSettings(w http.ResponseWriter, r *http.Request)
 		"bookable_end":             settings.BookableEnd.Format("15:04"),
 		"min_hours":                settings.MinHours,
 		"max_hours":                settings.MaxHours,
+		"min_lead_hours":           settings.MinLeadHours,
 		"timezone":                 settings.Timezone,
 		"referral_sources":         settings.ReferralSources,
 		"new_customer_restriction": restriction,
@@ -131,6 +132,7 @@ func (s *Server) handleGetAvailability(w http.ResponseWriter, r *http.Request) {
 		Available bool      `json:"available"`
 	}
 
+	earliest := earliestBookableStart(settings)
 	var slots []slot
 	for t := dayStart; t.Before(dayEnd); t = t.Add(time.Hour) {
 		slotEnd := t.Add(time.Hour)
@@ -148,8 +150,8 @@ func (s *Server) handleGetAvailability(w http.ResponseWriter, r *http.Request) {
 				break
 			}
 		}
-		// Past slots are not available
-		if t.Before(time.Now()) {
+		// Past slots, and slots inside the minimum notice period, are not available
+		if t.Before(earliest) {
 			available = false
 		}
 		slots = append(slots, slot{Start: t, End: slotEnd, Available: available})
@@ -482,9 +484,22 @@ func bookingWithinBookableHours(start, end time.Time, st *db.Settings, loc *time
 	return true
 }
 
+// earliestBookableStart is the earliest start time a new booking may have,
+// given the minimum notice period in settings.
+func earliestBookableStart(settings *db.Settings) time.Time {
+	return time.Now().Add(time.Duration(settings.MinLeadHours) * time.Hour)
+}
+
 func (s *Server) validateBookingCreate(ctx context.Context, start, end time.Time, settings *db.Settings) (badRequest string, err error) {
 	if start.Before(time.Now()) {
 		return "booking start time is in the past", nil
+	}
+	if start.Before(earliestBookableStart(settings)) {
+		unit := "hours"
+		if settings.MinLeadHours == 1 {
+			unit = "hour"
+		}
+		return fmt.Sprintf("bookings must be made at least %d %s in advance", settings.MinLeadHours, unit), nil
 	}
 
 	loc, lerr := time.LoadLocation(settings.Timezone)

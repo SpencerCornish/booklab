@@ -543,6 +543,7 @@ func (s *Server) handleAdminUpdateSettings(w http.ResponseWriter, r *http.Reques
 		MinHours               *int32    `json:"min_hours"`
 		MaxHours               *int32    `json:"max_hours"`
 		ReminderHoursBefore    *int32    `json:"reminder_hours_before"`
+		MinLeadHours           *int32    `json:"min_lead_hours"`
 		NotificationEmails     *string   `json:"notification_emails"`
 		AutoChargeDelayMinutes *int32    `json:"auto_charge_delay_minutes"`
 		ReferralSources        *[]string `json:"referral_sources"`
@@ -563,6 +564,7 @@ func (s *Server) handleAdminUpdateSettings(w http.ResponseWriter, r *http.Reques
 		MinHours:               req.MinHours,
 		MaxHours:               req.MaxHours,
 		ReminderHoursBefore:    req.ReminderHoursBefore,
+		MinLeadHours:           req.MinLeadHours,
 		NotificationEmails:     req.NotificationEmails,
 		AutoChargeDelayMinutes: req.AutoChargeDelayMinutes,
 		ReferralSources:        req.ReferralSources,
@@ -570,6 +572,10 @@ func (s *Server) handleAdminUpdateSettings(w http.ResponseWriter, r *http.Reques
 		PrivacyContent:         req.PrivacyContent,
 	}
 
+	if req.MinLeadHours != nil && *req.MinLeadHours < 0 {
+		s.writeError(w, r, http.StatusBadRequest, "min_lead_hours cannot be negative", nil)
+		return
+	}
 	if req.BookableStart != nil {
 		t, err := time.Parse("15:04", *req.BookableStart)
 		if err != nil {
@@ -721,6 +727,7 @@ func settingsToMap(s *db.Settings) map[string]any {
 		"min_hours":                 s.MinHours,
 		"max_hours":                 s.MaxHours,
 		"reminder_hours_before":     s.ReminderHoursBefore,
+		"min_lead_hours":            s.MinLeadHours,
 		"notification_emails":       s.NotificationEmails,
 		"auto_charge_delay_minutes": s.AutoChargeDelayMinutes,
 		"referral_sources":          s.ReferralSources,

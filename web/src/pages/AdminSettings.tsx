@@ -121,6 +121,9 @@ export default function AdminSettings() {
                 <input type="number" min="1" required className={inputClass} {...numberField('max_hours')} />
               </Field>
             </div>
+            <Field label="Minimum notice (hours)" hint="Bookings must start at least this many hours from now. 0 allows booking right up to the start time.">
+              <input type="number" min="0" required className={inputClass} {...numberField('min_lead_hours')} />
+            </Field>
           </div>
         </section>
 

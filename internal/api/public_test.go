@@ -62,6 +62,49 @@ func TestValidateBookingCreate_rejectsPastStart(t *testing.T) {
 	}
 }
 
+func TestValidateBookingCreate_rejectsInsideMinLeadTime(t *testing.T) {
+	s := &Server{cfg: testConfig(), logger: testLogger()}
+	settings := &db.Settings{Timezone: "UTC", MinHours: 1, MaxHours: 8, MinLeadHours: 24}
+	start := time.Now().Add(23 * time.Hour)
+	bad, err := s.validateBookingCreate(context.Background(), start, start.Add(2*time.Hour), settings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bad != "bookings must be made at least 24 hours in advance" {
+		t.Fatalf("got %q", bad)
+	}
+}
+
+func TestValidateBookingCreate_allowsBeyondMinLeadTime(t *testing.T) {
+	ctx := context.Background()
+	pool, q := openTestPool(t)
+	truncateBookingData(t, ctx, pool)
+	resetSettingsUTC(t, ctx, q)
+
+	t.Cleanup(func() {
+		zero := int32(0)
+		_, _ = q.UpdateSettings(context.Background(), db.UpdateSettingsParams{MinLeadHours: &zero})
+	})
+	lead := int32(24)
+	settings, err := q.UpdateSettings(ctx, db.UpdateSettingsParams{MinLeadHours: &lead})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if settings.MinLeadHours != 24 {
+		t.Fatalf("min_lead_hours = %d, want 24", settings.MinLeadHours)
+	}
+
+	s := &Server{queries: q, cfg: testConfig(), logger: testLogger()}
+	start := time.Date(2035, 7, 11, 11, 0, 0, 0, time.UTC)
+	bad, err := s.validateBookingCreate(ctx, start, start.Add(2*time.Hour), settings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bad != "" {
+		t.Fatalf("expected booking well beyond the notice period to pass, got %q", bad)
+	}
+}
+
 func TestValidateBookingCreate_rejectsOutsideBookableHours(t *testing.T) {
 	ctx := context.Background()
 	pool, q := openTestPool(t)

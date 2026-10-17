@@ -29,7 +29,7 @@ func (q *Queries) GetSettings(ctx context.Context) (*Settings, error) {
 	row := q.pool.QueryRow(ctx, `SELECT id, resource_name, hourly_rate_cents, currency, timezone,
 		bookable_start, bookable_end, min_hours, max_hours, reminder_hours_before, notification_emails,
 		auto_charge_delay_minutes, referral_sources, terms_content, privacy_content,
-		new_customer_block_start, new_customer_block_end, new_customer_block_message
+		new_customer_block_start, new_customer_block_end, new_customer_block_message, min_lead_hours
 		FROM settings WHERE id = 1`)
 	return scanSettings(row)
 }
@@ -44,6 +44,7 @@ type UpdateSettingsParams struct {
 	MinHours               *int32
 	MaxHours               *int32
 	ReminderHoursBefore    *int32
+	MinLeadHours           *int32
 	NotificationEmails     *string
 	AutoChargeDelayMinutes *int32
 	ReferralSources        *[]string
@@ -76,18 +77,20 @@ func (q *Queries) UpdateSettings(ctx context.Context, p UpdateSettingsParams) (*
 			privacy_content             = COALESCE($14, privacy_content),
 			new_customer_block_start    = CASE WHEN $15::bool THEN $16::date ELSE new_customer_block_start END,
 			new_customer_block_end      = CASE WHEN $15::bool THEN $17::date ELSE new_customer_block_end END,
-			new_customer_block_message  = COALESCE($18, new_customer_block_message)
+			new_customer_block_message  = COALESCE($18, new_customer_block_message),
+			min_lead_hours              = COALESCE($19, min_lead_hours)
 		WHERE id = 1
 		RETURNING id, resource_name, hourly_rate_cents, currency, timezone,
 			bookable_start, bookable_end, min_hours, max_hours, reminder_hours_before,
 			notification_emails, auto_charge_delay_minutes, referral_sources,
 			terms_content, privacy_content,
-			new_customer_block_start, new_customer_block_end, new_customer_block_message`,
+			new_customer_block_start, new_customer_block_end, new_customer_block_message, min_lead_hours`,
 		p.ResourceName, p.HourlyRateCents, p.Currency, p.Timezone,
 		p.BookableStart, p.BookableEnd, p.MinHours, p.MaxHours, p.ReminderHoursBefore,
 		p.NotificationEmails, p.AutoChargeDelayMinutes, p.ReferralSources,
 		p.TermsContent, p.PrivacyContent,
 		p.NewCustomerBlockSet, p.NewCustomerBlockStart, p.NewCustomerBlockEnd, p.NewCustomerBlockMessage,
+		p.MinLeadHours,
 	)
 	return scanSettings(row)
 }
@@ -100,6 +103,7 @@ func scanSettings(row pgx.Row) (*Settings, error) {
 		&s.NotificationEmails, &s.AutoChargeDelayMinutes, &s.ReferralSources,
 		&s.TermsContent, &s.PrivacyContent,
 		&s.NewCustomerBlockStart, &s.NewCustomerBlockEnd, &s.NewCustomerBlockMessage,
+		&s.MinLeadHours,
 	)
 	if err != nil {
 		return nil, err

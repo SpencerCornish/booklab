@@ -270,6 +270,11 @@ function BookingForm({ settings }: { settings: PublicSettings }) {
         <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">
           2. Choose a time
         </h2>
+        {settings.min_lead_hours > 0 && (
+          <p className="text-sm text-gray-500 mb-3">
+            Bookings must be made at least {settings.min_lead_hours} {settings.min_lead_hours === 1 ? 'hour' : 'hours'} in advance.
+          </p>
+        )}
         {loadingSlots ? (
           <div className="flex items-center gap-2 text-gray-400 py-4">
             <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-gray-400" />

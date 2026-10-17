@@ -14,6 +14,7 @@ export interface PublicSettings {
   bookable_end: string
   min_hours: number
   max_hours: number
+  min_lead_hours: number
   timezone: string
   referral_sources: string[]
   new_customer_restriction?: NewCustomerRestriction | null

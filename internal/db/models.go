@@ -71,6 +71,7 @@ type Settings struct {
 	NewCustomerBlockStart   *time.Time `json:"new_customer_block_start"`
 	NewCustomerBlockEnd     *time.Time `json:"new_customer_block_end"`
 	NewCustomerBlockMessage string     `json:"new_customer_block_message"`
+	MinLeadHours            int32      `json:"min_lead_hours"`
 }
 
 type AdminUser struct {
