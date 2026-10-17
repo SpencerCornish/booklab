@@ -165,6 +165,10 @@ function BookingForm({ settings }: { settings: PublicSettings }) {
       .finally(() => setLoadingSlots(false))
   }, [date])
 
+  // Dates are YYYY-MM-DD in the booking timezone, so string comparison is a date comparison.
+  const restriction = settings.new_customer_restriction
+  const dateRestricted = !!restriction && date >= restriction.start_date && date <= restriction.end_date
+
   const handleSlotSelect = (start: string, end: string) => {
     setSelectedStart(start)
     setSelectedEnd(end)
@@ -276,15 +280,23 @@ function BookingForm({ settings }: { settings: PublicSettings }) {
             This date is closed{availability.closure_reason ? `: ${availability.closure_reason}` : ''}.
           </div>
         ) : (
-          <TimeSlotPicker
-            slots={availability?.slots ?? []}
-            selectedStart={selectedStart}
-            selectedEnd={selectedEnd}
-            minHours={settings.min_hours}
-            maxHours={settings.max_hours}
-            onSelect={handleSlotSelect}
-            onClear={() => { setSelectedStart(null); setSelectedEnd(null) }}
-          />
+          <>
+            {dateRestricted && (
+              <div className="rounded-xl bg-amber-50 border border-amber-200 px-4 py-3 text-amber-800 text-sm mb-3">
+                <p className="font-medium">Returning customers only on this date</p>
+                <p className="mt-0.5">{restriction.message}</p>
+              </div>
+            )}
+            <TimeSlotPicker
+              slots={availability?.slots ?? []}
+              selectedStart={selectedStart}
+              selectedEnd={selectedEnd}
+              minHours={settings.min_hours}
+              maxHours={settings.max_hours}
+              onSelect={handleSlotSelect}
+              onClear={() => { setSelectedStart(null); setSelectedEnd(null) }}
+            />
+          </>
         )}
       </section>
 
