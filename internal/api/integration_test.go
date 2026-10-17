@@ -39,7 +39,7 @@ func openTestPool(t *testing.T) (*pgxpool.Pool, *db.Queries) {
 
 func truncateBookingData(t *testing.T, ctx context.Context, pool *pgxpool.Pool) {
 	t.Helper()
-	_, err := pool.Exec(ctx, `TRUNCATE login_attempts, admin_sessions, admin_users, bookings, closures RESTART IDENTITY CASCADE`)
+	_, err := pool.Exec(ctx, `TRUNCATE login_attempts, booking_prepare_attempts, admin_sessions, admin_users, bookings, closures RESTART IDENTITY CASCADE`)
 	if err != nil {
 		t.Fatalf("truncate: %v", err)
 	}
@@ -68,10 +68,13 @@ func resetSettingsUTC(t *testing.T, ctx context.Context, q *db.Queries) {
 	}
 }
 
-// mockStripe implements stripe.Client for tests; counts ChargePaymentMethod calls.
+// mockStripe implements stripe.Client for tests; counts ChargePaymentMethod calls and
+// records their idempotency keys. chargeErrs are returned by successive charges.
 type mockStripe struct {
 	mu          sync.Mutex
 	chargeCalls int
+	chargeKeys  []string
+	chargeErrs  []error
 }
 
 func (m *mockStripe) CreateSetupIntent(email string) (string, string, error) {
@@ -84,8 +87,16 @@ func (m *mockStripe) GetPaymentMethodFromSetupIntent(setupIntentID string) (stri
 
 func (m *mockStripe) ChargePaymentMethod(pmID string, amountCents int64, currency, description, idempotencyKey string) (string, string, error) {
 	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.chargeCalls++
-	m.mu.Unlock()
+	m.chargeKeys = append(m.chargeKeys, idempotencyKey)
+	if len(m.chargeErrs) > 0 {
+		err := m.chargeErrs[0]
+		m.chargeErrs = m.chargeErrs[1:]
+		if err != nil {
+			return "", "", err
+		}
+	}
 	return "pi_test_mock", "https://stripe.test/receipt", nil
 }
 

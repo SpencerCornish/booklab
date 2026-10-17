@@ -3,6 +3,7 @@ package stripe
 import (
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/stripe/stripe-go/v85"
 	"github.com/stripe/stripe-go/v85/customer"
@@ -105,6 +106,13 @@ func (s *Service) ChargePaymentMethod(pmID string, amountCents int64, currency, 
 	}
 	s.logger.Info("stripe charge_payment_method ok", "payment_intent_id", pi.ID, "payment_method_id", pmID, "idempotency_key", idempotencyKey)
 	return pi.ID, receiptURL, nil
+}
+
+// ChargeDescription is the PaymentIntent description for a booking charge. Manual and
+// automatic charges must send identical parameters, because a retry may reuse the other
+// path's idempotency key and Stripe rejects a reused key whose parameters differ.
+func ChargeDescription(resourceName string, start time.Time) string {
+	return resourceName + " – " + start.Format("Jan 2, 2006")
 }
 
 // DetachPaymentMethod detaches a saved card (e.g. on cancellation).
