@@ -534,38 +534,40 @@ func (s *Server) handleAdminGetSettings(w http.ResponseWriter, r *http.Request) 
 
 func (s *Server) handleAdminUpdateSettings(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		ResourceName             *string `json:"resource_name"`
-		HourlyRateCents          *int32  `json:"hourly_rate_cents"`
-		Currency                 *string `json:"currency"`
-		Timezone                 *string `json:"timezone"`
-		BookableStart            *string `json:"bookable_start"`
-		BookableEnd              *string `json:"bookable_end"`
-		MinHours                 *int32  `json:"min_hours"`
-		MaxHours                 *int32  `json:"max_hours"`
-		ReminderHoursBefore      *int32  `json:"reminder_hours_before"`
-		NotificationEmails       *string   `json:"notification_emails"`
-		AutoChargeDelayMinutes   *int32    `json:"auto_charge_delay_minutes"`
-		ReferralSources          *[]string `json:"referral_sources"`
-		TermsContent             *string   `json:"terms_content"`
-		PrivacyContent           *string   `json:"privacy_content"`
+		ResourceName           *string   `json:"resource_name"`
+		HourlyRateCents        *int32    `json:"hourly_rate_cents"`
+		Currency               *string   `json:"currency"`
+		Timezone               *string   `json:"timezone"`
+		BookableStart          *string   `json:"bookable_start"`
+		BookableEnd            *string   `json:"bookable_end"`
+		MinHours               *int32    `json:"min_hours"`
+		MaxHours               *int32    `json:"max_hours"`
+		ReminderHoursBefore    *int32    `json:"reminder_hours_before"`
+		NotificationEmails     *string   `json:"notification_emails"`
+		AutoChargeDelayMinutes *int32    `json:"auto_charge_delay_minutes"`
+		ReferralSources        *[]string `json:"referral_sources"`
+		TermsContent           *string   `json:"terms_content"`
+		PrivacyContent         *string   `json:"privacy_content"`
+		// Raw so an absent field (leave unchanged) can be told apart from null (clear the window).
+		NewCustomerRestriction json.RawMessage `json:"new_customer_restriction"`
 	}
 	if !s.readJSONRequest(w, r, &req) {
 		return
 	}
 
 	params := db.UpdateSettingsParams{
-		ResourceName:             req.ResourceName,
-		HourlyRateCents:          req.HourlyRateCents,
-		Currency:                 req.Currency,
-		Timezone:                 req.Timezone,
-		MinHours:                 req.MinHours,
-		MaxHours:                 req.MaxHours,
-		ReminderHoursBefore:      req.ReminderHoursBefore,
-		NotificationEmails:       req.NotificationEmails,
-		AutoChargeDelayMinutes:   req.AutoChargeDelayMinutes,
-		ReferralSources:          req.ReferralSources,
-		TermsContent:             req.TermsContent,
-		PrivacyContent:           req.PrivacyContent,
+		ResourceName:           req.ResourceName,
+		HourlyRateCents:        req.HourlyRateCents,
+		Currency:               req.Currency,
+		Timezone:               req.Timezone,
+		MinHours:               req.MinHours,
+		MaxHours:               req.MaxHours,
+		ReminderHoursBefore:    req.ReminderHoursBefore,
+		NotificationEmails:     req.NotificationEmails,
+		AutoChargeDelayMinutes: req.AutoChargeDelayMinutes,
+		ReferralSources:        req.ReferralSources,
+		TermsContent:           req.TermsContent,
+		PrivacyContent:         req.PrivacyContent,
 	}
 
 	if req.BookableStart != nil {
@@ -583,6 +585,17 @@ func (s *Server) handleAdminUpdateSettings(w http.ResponseWriter, r *http.Reques
 			return
 		}
 		params.BookableEnd = &t
+	}
+	if len(req.NewCustomerRestriction) > 0 {
+		start, end, message, badReq, err := parseNewCustomerRestriction(req.NewCustomerRestriction)
+		if badReq != "" {
+			s.writeError(w, r, http.StatusBadRequest, badReq, err)
+			return
+		}
+		params.NewCustomerBlockSet = true
+		params.NewCustomerBlockStart = start
+		params.NewCustomerBlockEnd = end
+		params.NewCustomerBlockMessage = &message
 	}
 
 	settings, err := s.queries.UpdateSettings(r.Context(), params)
@@ -699,21 +712,63 @@ func parseID(r *http.Request) (int32, error) {
 
 func settingsToMap(s *db.Settings) map[string]any {
 	return map[string]any{
-		"resource_name":              s.ResourceName,
-		"hourly_rate_cents":          s.HourlyRateCents,
-		"currency":                   s.Currency,
-		"timezone":                   s.Timezone,
-		"bookable_start":             s.BookableStart.Format("15:04"),
-		"bookable_end":               s.BookableEnd.Format("15:04"),
-		"min_hours":                  s.MinHours,
-		"max_hours":                  s.MaxHours,
-		"reminder_hours_before":      s.ReminderHoursBefore,
-		"notification_emails":        s.NotificationEmails,
-		"auto_charge_delay_minutes":  s.AutoChargeDelayMinutes,
-		"referral_sources":           s.ReferralSources,
-		"terms_content":              s.TermsContent,
-		"privacy_content":            s.PrivacyContent,
+		"resource_name":             s.ResourceName,
+		"hourly_rate_cents":         s.HourlyRateCents,
+		"currency":                  s.Currency,
+		"timezone":                  s.Timezone,
+		"bookable_start":            s.BookableStart.Format("15:04"),
+		"bookable_end":              s.BookableEnd.Format("15:04"),
+		"min_hours":                 s.MinHours,
+		"max_hours":                 s.MaxHours,
+		"reminder_hours_before":     s.ReminderHoursBefore,
+		"notification_emails":       s.NotificationEmails,
+		"auto_charge_delay_minutes": s.AutoChargeDelayMinutes,
+		"referral_sources":          s.ReferralSources,
+		"terms_content":             s.TermsContent,
+		"privacy_content":           s.PrivacyContent,
+		"new_customer_restriction":  newCustomerRestrictionToMap(s),
 	}
+}
+
+// newCustomerRestrictionToMap returns the configured window as an object, or nil when unset.
+func newCustomerRestrictionToMap(s *db.Settings) map[string]any {
+	if s.NewCustomerBlockStart == nil || s.NewCustomerBlockEnd == nil {
+		return nil
+	}
+	return map[string]any{
+		"start_date": s.NewCustomerBlockStart.Format("2006-01-02"),
+		"end_date":   s.NewCustomerBlockEnd.Format("2006-01-02"),
+		"message":    s.NewCustomerBlockMessage,
+	}
+}
+
+// parseNewCustomerRestriction decodes the admin payload for the new-customer window.
+// A JSON null clears the window and returns nil dates. badRequest is non-empty when the
+// payload is invalid.
+func parseNewCustomerRestriction(raw json.RawMessage) (start, end *time.Time, message string, badRequest string, err error) {
+	if string(raw) == "null" {
+		return nil, nil, "", "", nil
+	}
+	var in struct {
+		StartDate string `json:"start_date"`
+		EndDate   string `json:"end_date"`
+		Message   string `json:"message"`
+	}
+	if err := json.Unmarshal(raw, &in); err != nil {
+		return nil, nil, "", "invalid new_customer_restriction object", err
+	}
+	s, err := time.Parse("2006-01-02", in.StartDate)
+	if err != nil {
+		return nil, nil, "", "invalid new_customer_restriction start_date (YYYY-MM-DD)", err
+	}
+	e, err := time.Parse("2006-01-02", in.EndDate)
+	if err != nil {
+		return nil, nil, "", "invalid new_customer_restriction end_date (YYYY-MM-DD)", err
+	}
+	if e.Before(s) {
+		return nil, nil, "", "new_customer_restriction end_date must be on or after start_date", nil
+	}
+	return &s, &e, in.Message, "", nil
 }
 
 func closureToMap(c *db.Closure) map[string]any {

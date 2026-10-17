@@ -28,26 +28,33 @@ func New(pool *pgxpool.Pool) *Queries {
 func (q *Queries) GetSettings(ctx context.Context) (*Settings, error) {
 	row := q.pool.QueryRow(ctx, `SELECT id, resource_name, hourly_rate_cents, currency, timezone,
 		bookable_start, bookable_end, min_hours, max_hours, reminder_hours_before, notification_emails,
-		auto_charge_delay_minutes, referral_sources, terms_content, privacy_content
+		auto_charge_delay_minutes, referral_sources, terms_content, privacy_content,
+		new_customer_block_start, new_customer_block_end, new_customer_block_message
 		FROM settings WHERE id = 1`)
 	return scanSettings(row)
 }
 
 type UpdateSettingsParams struct {
-	ResourceName             *string
-	HourlyRateCents          *int32
-	Currency                 *string
-	Timezone                 *string
-	BookableStart            *time.Time
-	BookableEnd              *time.Time
-	MinHours                 *int32
-	MaxHours                 *int32
-	ReminderHoursBefore      *int32
-	NotificationEmails       *string
-	AutoChargeDelayMinutes   *int32
-	ReferralSources          *[]string
-	TermsContent             *string
-	PrivacyContent           *string
+	ResourceName           *string
+	HourlyRateCents        *int32
+	Currency               *string
+	Timezone               *string
+	BookableStart          *time.Time
+	BookableEnd            *time.Time
+	MinHours               *int32
+	MaxHours               *int32
+	ReminderHoursBefore    *int32
+	NotificationEmails     *string
+	AutoChargeDelayMinutes *int32
+	ReferralSources        *[]string
+	TermsContent           *string
+	PrivacyContent         *string
+	// NewCustomerBlockSet controls whether the window dates are written at all.
+	// COALESCE cannot store NULL, so a nil start/end with Set=true clears the window.
+	NewCustomerBlockSet     bool
+	NewCustomerBlockStart   *time.Time
+	NewCustomerBlockEnd     *time.Time
+	NewCustomerBlockMessage *string
 }
 
 func (q *Queries) UpdateSettings(ctx context.Context, p UpdateSettingsParams) (*Settings, error) {
@@ -66,16 +73,21 @@ func (q *Queries) UpdateSettings(ctx context.Context, p UpdateSettingsParams) (*
 			auto_charge_delay_minutes   = COALESCE($11, auto_charge_delay_minutes),
 			referral_sources            = COALESCE($12, referral_sources),
 			terms_content               = COALESCE($13, terms_content),
-			privacy_content             = COALESCE($14, privacy_content)
+			privacy_content             = COALESCE($14, privacy_content),
+			new_customer_block_start    = CASE WHEN $15::bool THEN $16::date ELSE new_customer_block_start END,
+			new_customer_block_end      = CASE WHEN $15::bool THEN $17::date ELSE new_customer_block_end END,
+			new_customer_block_message  = COALESCE($18, new_customer_block_message)
 		WHERE id = 1
 		RETURNING id, resource_name, hourly_rate_cents, currency, timezone,
 			bookable_start, bookable_end, min_hours, max_hours, reminder_hours_before,
 			notification_emails, auto_charge_delay_minutes, referral_sources,
-			terms_content, privacy_content`,
+			terms_content, privacy_content,
+			new_customer_block_start, new_customer_block_end, new_customer_block_message`,
 		p.ResourceName, p.HourlyRateCents, p.Currency, p.Timezone,
 		p.BookableStart, p.BookableEnd, p.MinHours, p.MaxHours, p.ReminderHoursBefore,
 		p.NotificationEmails, p.AutoChargeDelayMinutes, p.ReferralSources,
 		p.TermsContent, p.PrivacyContent,
+		p.NewCustomerBlockSet, p.NewCustomerBlockStart, p.NewCustomerBlockEnd, p.NewCustomerBlockMessage,
 	)
 	return scanSettings(row)
 }
@@ -87,6 +99,7 @@ func scanSettings(row pgx.Row) (*Settings, error) {
 		&s.BookableStart, &s.BookableEnd, &s.MinHours, &s.MaxHours, &s.ReminderHoursBefore,
 		&s.NotificationEmails, &s.AutoChargeDelayMinutes, &s.ReferralSources,
 		&s.TermsContent, &s.PrivacyContent,
+		&s.NewCustomerBlockStart, &s.NewCustomerBlockEnd, &s.NewCustomerBlockMessage,
 	)
 	if err != nil {
 		return nil, err
@@ -100,6 +113,10 @@ func scanSettings(row pgx.Row) (*Settings, error) {
 // ----- Bookings -----
 
 func (q *Queries) CreateBooking(ctx context.Context, name, email string, metadata map[string]string, start, end time.Time, setupIntentID, paymentMethodID string) (*Booking, error) {
+	// metadata is NOT NULL; a nil map would otherwise be written as SQL NULL.
+	if metadata == nil {
+		metadata = map[string]string{}
+	}
 	var pm any
 	if paymentMethodID != "" {
 		pm = paymentMethodID
@@ -327,6 +344,15 @@ func (q *Queries) CountPriorBookings(ctx context.Context, email string, excludeI
 		email, excludeID,
 	).Scan(&count)
 	return count, err
+}
+
+func (q *Queries) HasCompletedBooking(ctx context.Context, email string) (bool, error) {
+	var exists bool
+	err := q.pool.QueryRow(ctx,
+		`SELECT EXISTS(SELECT 1 FROM bookings WHERE lower(email) = lower($1) AND status IN ('completed', 'charging', 'charged'))`,
+		email,
+	).Scan(&exists)
+	return exists, err
 }
 
 func (q *Queries) MarkReminderSent(ctx context.Context, id int32) error {

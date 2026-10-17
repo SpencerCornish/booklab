@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { format } from 'date-fns'
+import { format, parseISO } from 'date-fns'
 import { loadStripe } from '@stripe/stripe-js'
 import { Elements, CardElement, useStripe, useElements } from '@stripe/react-stripe-js'
 import { DatePicker } from '../components/DatePicker'
@@ -12,7 +12,7 @@ import {
   createBooking,
   ApiError,
 } from '../lib/api'
-import type { PublicSettings, AvailabilityResponse, BookingPublic } from '../lib/types'
+import type { PublicSettings, AvailabilityResponse, BookingPublic, NewCustomerRestriction } from '../lib/types'
 
 // Stripe publishable key from env (set in .env or via Vite)
 const stripePromise = loadStripe(import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY ?? '')
@@ -43,6 +43,10 @@ export default function BookingPage() {
         </div>
       </header>
 
+      {settings.new_customer_restriction && (
+        <NewCustomerNotice restriction={settings.new_customer_restriction} />
+      )}
+
       <div className="flex-1">
         <Elements stripe={stripePromise}>
           <BookingForm settings={settings} />
@@ -50,6 +54,57 @@ export default function BookingPage() {
       </div>
 
       <Footer />
+    </div>
+  )
+}
+
+function NewCustomerNotice({ restriction }: { restriction: NewCustomerRestriction }) {
+  // Keyed on the whole restriction so a new window or message shows again.
+  const storageKey = `booklab.newCustomerNotice.${restriction.start_date}|${restriction.end_date}|${restriction.message}`
+  const [open, setOpen] = useState(() => {
+    try {
+      return localStorage.getItem(storageKey) !== '1'
+    } catch {
+      return true
+    }
+  })
+
+  if (!open) return null
+
+  const dismiss = () => {
+    try {
+      localStorage.setItem(storageKey, '1')
+    } catch {
+      // Storage unavailable: the notice will show again on the next visit.
+    }
+    setOpen(false)
+  }
+
+  const formatDate = (iso: string) => format(parseISO(iso), 'MMMM d, yyyy')
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/50 px-4">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="new-customer-notice-title"
+        className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl"
+      >
+        <h2 id="new-customer-notice-title" className="text-lg font-bold text-gray-900 mb-2">
+          Returning customers only
+        </h2>
+        <p className="text-sm text-gray-700">{restriction.message}</p>
+        <p className="text-sm text-gray-500 mt-3">
+          Dates: {formatDate(restriction.start_date)} – {formatDate(restriction.end_date)}
+        </p>
+        <button
+          type="button"
+          onClick={dismiss}
+          className="mt-5 w-full bg-blue-600 text-white rounded-lg py-2.5 font-medium text-sm hover:bg-blue-700 transition-colors"
+        >
+          OK, got it
+        </button>
+      </div>
     </div>
   )
 }

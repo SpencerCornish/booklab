@@ -51,3 +51,10 @@ UPDATE bookings SET reminder_sent = TRUE WHERE id = $1;
 
 -- name: CancelBooking :one
 UPDATE bookings SET status = 'cancelled' WHERE cancel_token = $1 AND status = 'confirmed' RETURNING *;
+
+-- name: HasCompletedBooking :one
+SELECT EXISTS(
+    SELECT 1 FROM bookings
+    WHERE lower(email) = lower($1)
+      AND status IN ('completed', 'charging', 'charged')
+);

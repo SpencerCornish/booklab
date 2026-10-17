@@ -355,3 +355,72 @@ func TestAdminUpdateBooking_rejectsCompletedWithoutPaymentMethod(t *testing.T) {
 		t.Fatalf("status %d want 400 body %s", resp.StatusCode, b)
 	}
 }
+
+func TestAdminSettings_newCustomerRestriction(t *testing.T) {
+	ctx := context.Background()
+	pool, q := openTestPool(t)
+	truncateBookingData(t, ctx, pool)
+	resetSettingsUTC(t, ctx, q)
+
+	hash, err := bcrypt.GenerateFromPassword([]byte("s3cret!"), bcrypt.MinCost)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := q.CreateAdminUser(ctx, "admin", string(hash)); err != nil {
+		t.Fatal(err)
+	}
+	ts := newCustomerTestServer(t, q)
+	sess := loginAndSession(t, ts.URL, "admin", "s3cret!")
+	csrfTok := "testcsrf01234567890123456789012"
+
+	put := func(payload string) (int, map[string]any) {
+		req := mustNewRequest(t, http.MethodPut, ts.URL+"/api/admin/settings", strings.NewReader(payload))
+		addAdminCookies(req, sess, csrfTok)
+		req.Header.Set("X-CSRF-Token", csrfTok)
+		resp := doReq(t, ts.Client(), req)
+		defer resp.Body.Close()
+		var body map[string]any
+		_ = json.NewDecoder(resp.Body).Decode(&body)
+		return resp.StatusCode, body
+	}
+
+	status, body := put(`{"new_customer_restriction":{"start_date":"2035-06-01","end_date":"2035-06-30","message":"Closed"}}`)
+	if status != http.StatusOK {
+		t.Fatalf("set window: status %d body %v", status, body)
+	}
+	got, _ := body["new_customer_restriction"].(map[string]any)
+	if got == nil || got["start_date"] != "2035-06-01" || got["end_date"] != "2035-06-30" || got["message"] != "Closed" {
+		t.Fatalf("set window: response restriction = %v", got)
+	}
+
+	// An absent field leaves the window unchanged.
+	status, body = put(`{"min_hours":2}`)
+	if status != http.StatusOK || body["new_customer_restriction"] == nil {
+		t.Fatalf("absent field: status %d restriction %v, want unchanged", status, body["new_customer_restriction"])
+	}
+
+	for name, payload := range map[string]string{
+		"end before start": `{"new_customer_restriction":{"start_date":"2035-06-30","end_date":"2035-06-01","message":""}}`,
+		"bad start format": `{"new_customer_restriction":{"start_date":"June 1","end_date":"2035-06-30","message":""}}`,
+		"missing end":      `{"new_customer_restriction":{"start_date":"2035-06-01","message":""}}`,
+	} {
+		if status, _ := put(payload); status != http.StatusBadRequest {
+			t.Fatalf("%s: status %d, want 400", name, status)
+		}
+	}
+
+	status, body = put(`{"new_customer_restriction":null}`)
+	if status != http.StatusOK {
+		t.Fatalf("clear: status %d body %v", status, body)
+	}
+	if v, ok := body["new_customer_restriction"]; !ok || v != nil {
+		t.Fatalf("clear: response restriction = %v, want null", v)
+	}
+	stored, err := q.GetSettings(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.NewCustomerBlockStart != nil || stored.NewCustomerBlockEnd != nil || stored.NewCustomerBlockMessage != "" {
+		t.Fatalf("clear: stored window still set: %+v", stored)
+	}
+}
