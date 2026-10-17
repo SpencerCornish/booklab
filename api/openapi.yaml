@@ -114,6 +114,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          description: Too many SetupIntents created from this client IP in the last hour (limit 10). Requests that fail validation do not count.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
 
   /bookings:
     post:
@@ -209,6 +215,12 @@ paths:
                 type: string
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "429":
+          description: Too many failed logins in the last 15 minutes for this username or client IP (limit 10 each).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
 
   /admin/logout:
     post:
