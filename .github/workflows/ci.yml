@@ -96,11 +96,7 @@ jobs:
           cache-dependency-path: web/pnpm-lock.yaml
 
       - name: Install hurl
-        run: |
-          curl -fsSL -o /tmp/hurl.tar.gz "https://github.com/Orange-OpenSource/hurl/releases/download/8.0.1/hurl-8.0.1-x86_64-unknown-linux-gnu.tar.gz"
-          tar -xzf /tmp/hurl.tar.gz -C /tmp
-          sudo install /tmp/hurl-8.0.1-x86_64-unknown-linux-gnu/bin/hurl /usr/local/bin/hurl
-          hurl --version
+        uses: ./.github/actions/setup-hurl
 
       - name: Build app (web + api)
         run: make build
@@ -176,11 +172,7 @@ jobs:
           cache-dependency-path: go.sum
 
       - name: Install hurl
-        run: |
-          curl -fsSL -o /tmp/hurl.tar.gz "https://github.com/Orange-OpenSource/hurl/releases/download/8.0.1/hurl-8.0.1-x86_64-unknown-linux-gnu.tar.gz"
-          tar -xzf /tmp/hurl.tar.gz -C /tmp
-          sudo install /tmp/hurl-8.0.1-x86_64-unknown-linux-gnu/bin/hurl /usr/local/bin/hurl
-          hurl --version
+        uses: ./.github/actions/setup-hurl
 
       - name: Build & probe the production compose stack
         run: make test-smoke
