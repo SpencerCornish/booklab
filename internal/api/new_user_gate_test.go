@@ -516,6 +516,45 @@ func TestAvailableDates_trainerWindowsClosuresAndBookings(t *testing.T) {
 	}
 }
 
+func TestAvailableDates_partialClosuresOnlyBlockTheirDates(t *testing.T) {
+	open := time.Date(0, 1, 1, 10, 0, 0, 0, time.UTC)
+	close := time.Date(0, 1, 1, 12, 0, 0, 0, time.UTC)
+	settings := &db.Settings{
+		Timezone:      "UTC",
+		BookableStart: open,
+		BookableEnd:   close,
+		MinHours:      2,
+		MaxHours:      8,
+	}
+	for weekday := 0; weekday < 7; weekday++ {
+		settings.NewUserGateSchedule = append(settings.NewUserGateSchedule, db.NewUserWindow{
+			Weekday: weekday, Start: "10:00", End: "12:00",
+		})
+	}
+
+	for _, trainerHours := range []bool{false, true} {
+		for _, closureDays := range []int{1, 2} {
+			t.Run(fmt.Sprintf("trainer=%t/closure_days=%d", trainerHours, closureDays), func(t *testing.T) {
+				closures := []*db.Closure{{
+					StartDate: gateTestDate.AddDate(0, 0, 1),
+					EndDate:   gateTestDate.AddDate(0, 0, closureDays),
+					AllDay:    false,
+					StartTime: &open,
+					EndTime:   &close,
+				}}
+				dates := availableDates(settings, closures, nil, gateTestDate, 4, time.UTC, trainerHours)
+				want := []string{gateTestDate.Format("2006-01-02")}
+				for offset := closureDays + 1; offset < 4; offset++ {
+					want = append(want, gateTestDate.AddDate(0, 0, offset).Format("2006-01-02"))
+				}
+				if strings.Join(dates, ",") != strings.Join(want, ",") {
+					t.Fatalf("available dates = %v, want %v", dates, want)
+				}
+			})
+		}
+	}
+}
+
 func TestAvailableDaysEndpoint_newUserOnlyTrainerDays(t *testing.T) {
 	ctx := context.Background()
 	pool, q := openTestPool(t)

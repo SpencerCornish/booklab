@@ -165,13 +165,25 @@ function BookingForm({ settings }: { settings: PublicSettings }) {
 
   useEffect(() => {
     if (!answered) return
+    let cancelled = false
     setLoadingSlots(true)
+    setAvailability(null)
     setSelectedStart(null)
     setSelectedEnd(null)
     getAvailability(date, gateEnabled ? isNewUser === true : undefined)
-      .then(setAvailability)
-      .catch(console.error)
-      .finally(() => setLoadingSlots(false))
+      .then((data) => {
+        if (!cancelled) setAvailability(data)
+      })
+      .catch((err) => {
+        if (!cancelled) console.error(err)
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingSlots(false)
+      })
+    // A date or answer change can start another request before this one finishes.
+    return () => {
+      cancelled = true
+    }
   }, [date, isNewUser, gateEnabled, answered])
 
   // Which upcoming days have any bookable time, so the date strip can grey out
