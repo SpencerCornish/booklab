@@ -159,13 +159,15 @@ func TestCreateBooking_rateLimitedPerIP(t *testing.T) {
 	t.Cleanup(ts.Close)
 
 	// One payload per distinct day: bookings cannot overlap, so each needs its own slot.
-	payload := func(i int) string {
+	// Payloads are minted once so a later replay of index 0 reuses its setup_intent_id.
+	payloads := make([]string, bookingCreateRateLimitMax+1)
+	for i := range payloads {
 		start := time.Date(2035, 6, 1+i, 12, 0, 0, 0, time.UTC)
-		return fmt.Sprintf(`{"setup_intent_id":%q,"name":"Pat","email":"pat@example.com","start_time":%q,"end_time":%q}`,
+		payloads[i] = fmt.Sprintf(`{"setup_intent_id":%q,"name":"Pat","email":"pat@example.com","start_time":%q,"end_time":%q}`,
 			mintSetupIntentID(t), start.Format(time.RFC3339), start.Add(2*time.Hour).Format(time.RFC3339))
 	}
 	create := func(i int) int {
-		req := mustNewRequest(t, http.MethodPost, ts.URL+"/api/bookings", strings.NewReader(payload(i)))
+		req := mustNewRequest(t, http.MethodPost, ts.URL+"/api/bookings", strings.NewReader(payloads[i]))
 		resp := doReq(t, ts.Client(), req)
 		defer resp.Body.Close()
 		return resp.StatusCode
@@ -176,7 +178,7 @@ func TestCreateBooking_rateLimitedPerIP(t *testing.T) {
 			t.Fatalf("create %d: status %d want 201", i, got)
 		}
 	}
-	if got := create(99); got != http.StatusTooManyRequests {
+	if got := create(bookingCreateRateLimitMax); got != http.StatusTooManyRequests {
 		t.Fatalf("create over limit: status %d want 429", got)
 	}
 
