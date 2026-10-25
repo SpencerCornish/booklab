@@ -58,9 +58,15 @@ HTTP 200
 jsonpath "$" count == 0
 
 GET {{base_url}}/api/admin/bookings?status=bogus
-HTTP 500
+HTTP 400
 
 GET {{base_url}}/api/admin/bookings?date=not-a-date
+HTTP 400
+
+# Invalid input is rejected as a 400, never a Postgres cast error (500).
+PATCH {{base_url}}/api/admin/bookings/{{booking_id}}
+X-CSRF-Token: {{csrf}}
+{"status": "bogus"}
 HTTP 400
 
 # Extend the booking to 13:00 (3h total).

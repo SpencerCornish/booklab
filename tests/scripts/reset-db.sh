@@ -5,9 +5,8 @@
 # the settings row to defaults so suites that mutate settings stay independent.
 # Clears state tables between suites so ordering never matters.
 set -euo pipefail
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 # shellcheck source=tests/scripts/lib.sh
-source "$ROOT/tests/scripts/lib.sh"
+source "${ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}/tests/scripts/lib.sh"
 
 if ! db_ready; then
   echo "reset-db: test Postgres container is not running (run tests/scripts/stack-up.sh first)" >&2

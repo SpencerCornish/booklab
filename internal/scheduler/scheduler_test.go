@@ -5,12 +5,12 @@ import (
 	"log/slog"
 	"os"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/spencercornish/booklab/internal/db"
 	emailsvc "github.com/spencercornish/booklab/internal/email"
+	"github.com/spencercornish/booklab/internal/stripe/stripetest"
 )
 
 func testDSN() string {
@@ -38,27 +38,6 @@ func resetSettingsUTC(t *testing.T, ctx context.Context, q *db.Queries) {
 	if err != nil {
 		t.Fatalf("reset settings: %v", err)
 	}
-}
-
-type countingStripe struct {
-	chargeCalls atomic.Int32
-}
-
-func (c *countingStripe) CreateSetupIntent(string) (string, string, error) {
-	panic("CreateSetupIntent not used in scheduler tests")
-}
-
-func (c *countingStripe) GetPaymentMethodFromSetupIntent(string) (string, error) {
-	panic("GetPaymentMethodFromSetupIntent not used in scheduler tests")
-}
-
-func (c *countingStripe) ChargePaymentMethod(string, int64, string, string, string) (string, string, error) {
-	c.chargeCalls.Add(1)
-	return "pi_sched_test", "https://stripe.test/receipt", nil
-}
-
-func (c *countingStripe) DetachPaymentMethod(string) error {
-	return nil
 }
 
 func TestAutoCharge_completed_concurrentOnlyOneCharge(t *testing.T) {
@@ -92,7 +71,7 @@ func TestAutoCharge_completed_concurrentOnlyOneCharge(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	st := &countingStripe{}
+	st := stripetest.NewCounting()
 	emailSvc := emailsvc.New("127.0.0.1", 1025, "", "", "sched@localhost", slog.New(slog.DiscardHandler))
 	s := New(q, emailSvc, st, "http://127.0.0.1:8080", slog.New(slog.DiscardHandler))
 
@@ -111,7 +90,7 @@ func TestAutoCharge_completed_concurrentOnlyOneCharge(t *testing.T) {
 	}
 	wg.Wait()
 
-	if got := st.chargeCalls.Load(); got != 1 {
+	if got := st.ChargeCalls(); got != 1 {
 		t.Fatalf("ChargePaymentMethod calls = %d, want 1", got)
 	}
 	nb, err := q.GetBookingByID(ctx, b.ID)

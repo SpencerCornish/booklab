@@ -6,9 +6,8 @@
 #      between Hurl files so suite order never matters
 #   3. tear everything down (even on failure)
 set -uo pipefail
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 # shellcheck source=tests/scripts/lib.sh
-source "$ROOT/tests/scripts/lib.sh"
+source "${ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}/tests/scripts/lib.sh"
 
 MODE="${1:-}"
 if [ "$MODE" != "hurl" ] && [ "$MODE" != "e2e" ]; then

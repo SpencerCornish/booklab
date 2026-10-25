@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 # Stop the functional-test app started by run-app.sh (no-op if not running).
 set -euo pipefail
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-PID="$ROOT/.functest/app.pid"
+PID="${ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}/.functest/app.pid"
 
 if [ -f "$PID" ]; then
   PIDVALUE="$(cat "$PID")"

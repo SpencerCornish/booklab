@@ -5,9 +5,8 @@
 # All sensitive values are placeholders: STRIPE_FAKE=1 makes every Stripe call
 # hermetic, and SMTP points at the Mailpit container from the test stack.
 set -euo pipefail
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 # shellcheck source=tests/scripts/lib.sh
-source "$ROOT/tests/scripts/lib.sh"
+source "${ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}/tests/scripts/lib.sh"
 
 BIN="${FUNCTEST_APP_BIN:-$ROOT/booklab}"
 
@@ -45,19 +44,14 @@ export ADMIN_PASS="$FUNC_ADMIN_PASS"
 nohup "$BIN" > "$LOG" 2>&1 &
 echo $! > "$PID"
 
-for _ in $(seq 1 120); do
-  if curl -sf "$(app_base_url)/api/health" >/dev/null 2>&1; then
-    echo "functest app ready on $(app_base_url) (pid $(cat "$PID"))"
-    exit 0
-  fi
+if ! wait_healthy "$(app_base_url)/api/health" 60; then
   if ! kill -0 "$(cat "$PID")" 2>/dev/null; then
     echo "run-app: app exited during startup — last log lines:" >&2
     tail -n 30 "$LOG" >&2
-    exit 1
+  else
+    echo "run-app: timed out waiting for $(app_base_url)/api/health — last log lines:" >&2
+    tail -n 30 "$LOG" >&2
   fi
-  sleep 0.5
-done
-
-echo "run-app: timed out waiting for $(app_base_url)/api/health — last log lines:" >&2
-tail -n 30 "$LOG" >&2
-exit 1
+  exit 1
+fi
+echo "functest app ready on $(app_base_url) (pid $(cat "$PID"))"

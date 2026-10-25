@@ -101,7 +101,7 @@ currently does. These suites guard against that in four ways:
 |---|---|---|
 | List shows booking with admin-only fields (setup-intent, PM ids) | 200, fields present | `bookingToAdmin` |
 | Filters `?status=`, `?date=` | Correct subsets; malformed date → 400 | `ListBookingsParams` |
-| Invalid `?status=bogus` | **500** | ⚑ **Flagged — this codifies observed behavior that is arguably wrong** (should likely be 400). Kept as-is so a future fix is a visible, deliberate diff |
+| Invalid `?status=` / PATCH `status` | **400** (invalid status filter / invalid status) | `validBookingStatuses` — fixed in this branch (was a Postgres cast error → 500); regression-tested at the Go level (`TestAdminBookings_invalidStatusIsBadRequest`) and in Hurl |
 | PATCH end_time / status=completed (PM on file) | 200, echoed | `UpdateBookingEndTime/Status` |
 | Charge, no amount | Computed: hours × 1500 (3 h → 4500), `status: charged`, `pi_fake_*`, receipt URL | `handleAdminChargeBooking` computed amount |
 | Second charge / charge charged booking | 409 | Claim-based idempotency (`ClaimBookingForCharge`) |
@@ -161,7 +161,7 @@ currently does. These suites guard against that in four ways:
 These are the lines where I chose an interpretation — read these first:
 
 1. **`prepare` on a taken slot → 409.** I initially wrote the test expecting 200 and corrected the *test* after observing the design (prepare validates availability up-front so the Stripe handoff never happens for dead slots). If you'd rather have prepare always 200, that's a product decision to make consciously.
-2. **`GET /api/admin/bookings?status=bogus` → 500.** Codified observed behavior; arguably should be 400. I pinned it so a fix shows up as a deliberate test change, not silence.
+2. ~~`?status=bogus` → 500~~ **Fixed**: invalid status input (list filter and PATCH) is now a 400 via `validBookingStatuses`.
 3. **Cancel of a charged booking → 409.** Follows the `WHERE status='confirmed'` rule. If admins should be able to cancel charged bookings (with refund flow), the test needs updating with the feature.
 4. **Unknown setup intent → 400.** The fake rejects IDs it didn't issue, mirroring real Stripe. If you'd prefer the fake to be more permissive, say so.
 5. **Email subjects pinned to copy** (`Booking Confirmed – The Space`, etc.). Copy edits will fail tests loudly by design — update both together.

@@ -14,6 +14,7 @@ import (
 	emailsvc "github.com/spencercornish/booklab/internal/email"
 
 	"github.com/spencercornish/booklab/internal/db"
+	"github.com/spencercornish/booklab/internal/stripe/stripetest"
 )
 
 func TestCreateBooking_requestBodyExceedsLimit(t *testing.T) {
@@ -22,7 +23,7 @@ func TestCreateBooking_requestBodyExceedsLimit(t *testing.T) {
 	truncateBookingData(t, ctx, pool)
 	resetSettingsUTC(t, ctx, q)
 
-	ms := &mockStripe{}
+	ms := stripetest.New()
 	emailSvc := emailsvc.New("127.0.0.1", 1025, "", "", "booklab@localhost", testLogger())
 	srv := New(testConfig(), q, ms, emailSvc, nil, testLogger())
 	ts := httptest.NewServer(srv.Handler())
@@ -273,7 +274,7 @@ func TestAvailability_allDayClosureBehindUTC(t *testing.T) {
 	}
 
 	emailSvc := emailsvc.New("127.0.0.1", 1025, "", "", "booklab@localhost", testLogger())
-	srv := New(testConfig(), q, &mockStripe{}, emailSvc, nil, testLogger())
+	srv := New(testConfig(), q, stripetest.New(), emailSvc, nil, testLogger())
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 
@@ -309,7 +310,7 @@ func TestAvailability_partialClosureBehindUTC(t *testing.T) {
 	}
 
 	emailSvc := emailsvc.New("127.0.0.1", 1025, "", "", "booklab@localhost", testLogger())
-	srv := New(testConfig(), q, &mockStripe{}, emailSvc, nil, testLogger())
+	srv := New(testConfig(), q, stripetest.New(), emailSvc, nil, testLogger())
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 
@@ -338,7 +339,7 @@ func TestPrepareBooking_returnsSetupIntent(t *testing.T) {
 	truncateBookingData(t, ctx, pool)
 	resetSettingsUTC(t, ctx, q)
 
-	ms := &mockStripe{}
+	ms := stripetest.New()
 	emailSvc := emailsvc.New("127.0.0.1", 1025, "", "", "booklab@localhost", testLogger())
 	srv := New(testConfig(), q, ms, emailSvc, nil, testLogger())
 	ts := httptest.NewServer(srv.Handler())
@@ -381,7 +382,7 @@ func TestCreateBooking_finalizeInsertsWithPaymentMethod(t *testing.T) {
 	truncateBookingData(t, ctx, pool)
 	resetSettingsUTC(t, ctx, q)
 
-	ms := &mockStripe{}
+	ms := stripetest.New()
 	emailSvc := emailsvc.New("127.0.0.1", 1025, "", "", "booklab@localhost", testLogger())
 	srv := New(testConfig(), q, ms, emailSvc, nil, testLogger())
 	ts := httptest.NewServer(srv.Handler())
@@ -389,8 +390,9 @@ func TestCreateBooking_finalizeInsertsWithPaymentMethod(t *testing.T) {
 
 	start := time.Date(2035, 6, 11, 12, 0, 0, 0, time.UTC)
 	end := start.Add(2 * time.Hour)
-	payload := fmt.Sprintf(`{"setup_intent_id":"si_test_mock","name":"Pat","email":"pat@example.com","start_time":%q,"end_time":%q}`,
-		start.Format(time.RFC3339), end.Format(time.RFC3339))
+	siID := mintSetupIntentID(t)
+	payload := fmt.Sprintf(`{"setup_intent_id":%q,"name":"Pat","email":"pat@example.com","start_time":%q,"end_time":%q}`,
+		siID, start.Format(time.RFC3339), end.Format(time.RFC3339))
 
 	req := mustNewRequest(t, http.MethodPost, ts.URL+"/api/bookings", strings.NewReader(payload))
 	resp := doReq(t, ts.Client(), req)
@@ -407,8 +409,8 @@ func TestCreateBooking_finalizeInsertsWithPaymentMethod(t *testing.T) {
 	if len(b) != 1 {
 		t.Fatalf("bookings count = %d, want 1", len(b))
 	}
-	if b[0].StripePaymentMethodID == nil || *b[0].StripePaymentMethodID != "pm_test_mock" {
-		t.Fatalf("payment method = %v, want pm_test_mock", b[0].StripePaymentMethodID)
+	if b[0].StripePaymentMethodID == nil || *b[0].StripePaymentMethodID != "pm_fake_"+siID {
+		t.Fatalf("payment method = %v, want pm_fake_%s", b[0].StripePaymentMethodID, siID)
 	}
 }
 
@@ -418,7 +420,7 @@ func TestCreateBooking_idempotentBySetupIntent(t *testing.T) {
 	truncateBookingData(t, ctx, pool)
 	resetSettingsUTC(t, ctx, q)
 
-	ms := &mockStripe{}
+	ms := stripetest.New()
 	emailSvc := emailsvc.New("127.0.0.1", 1025, "", "", "booklab@localhost", testLogger())
 	srv := New(testConfig(), q, ms, emailSvc, nil, testLogger())
 	ts := httptest.NewServer(srv.Handler())
@@ -426,8 +428,8 @@ func TestCreateBooking_idempotentBySetupIntent(t *testing.T) {
 
 	start := time.Date(2035, 6, 12, 12, 0, 0, 0, time.UTC)
 	end := start.Add(2 * time.Hour)
-	payload := fmt.Sprintf(`{"setup_intent_id":"si_test_mock","name":"Pat","email":"pat@example.com","start_time":%q,"end_time":%q}`,
-		start.Format(time.RFC3339), end.Format(time.RFC3339))
+	payload := fmt.Sprintf(`{"setup_intent_id":%q,"name":"Pat","email":"pat@example.com","start_time":%q,"end_time":%q}`,
+		mintSetupIntentID(t), start.Format(time.RFC3339), end.Format(time.RFC3339))
 
 	for i := 0; i < 2; i++ {
 		req := mustNewRequest(t, http.MethodPost, ts.URL+"/api/bookings", strings.NewReader(payload))
@@ -453,7 +455,7 @@ func TestCreateBooking_idempotentBySetupIntent(t *testing.T) {
 func newCustomerTestServer(t *testing.T, q *db.Queries) *httptest.Server {
 	t.Helper()
 	emailSvc := emailsvc.New("127.0.0.1", 1025, "", "", "booklab@localhost", testLogger())
-	srv := New(testConfig(), q, &mockStripe{}, emailSvc, nil, testLogger())
+	srv := New(testConfig(), q, stripetest.New(), emailSvc, nil, testLogger())
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 	return ts
@@ -491,9 +493,26 @@ func prepareBookingPayload(email string, start, end time.Time) string {
 	return fmt.Sprintf(`{"email":%q,"start_time":%q,"end_time":%q}`, email, start.Format(time.RFC3339), end.Format(time.RFC3339))
 }
 
-func createBookingPayload(start, end time.Time) string {
-	return fmt.Sprintf(`{"setup_intent_id":"si_test_mock","name":"Pat","email":"pat@example.com","start_time":%q,"end_time":%q}`,
-		start.Format(time.RFC3339), end.Format(time.RFC3339))
+// mintFake issues globally-unique setup-intent IDs for test payloads (a fresh
+// fake per call would restart its counter and hand back colliding IDs, which
+// the idempotency path would silently collapse).
+var mintFake = stripetest.New()
+
+// mintSetupIntentID returns a setup-intent ID issued by the shared fake, so
+// payloads exercise the same acceptance path as production flows.
+func mintSetupIntentID(t *testing.T) string {
+	t.Helper()
+	id, _, err := mintFake.CreateSetupIntent("pat@example.com")
+	if err != nil {
+		t.Fatalf("mint setup intent: %v", err)
+	}
+	return id
+}
+
+func createBookingPayload(t *testing.T, start, end time.Time) string {
+	t.Helper()
+	return fmt.Sprintf(`{"setup_intent_id":%q,"name":"Pat","email":"pat@example.com","start_time":%q,"end_time":%q}`,
+		mintSetupIntentID(t), start.Format(time.RFC3339), end.Format(time.RFC3339))
 }
 
 func TestNewCustomerRestriction_blocksNewCustomerInsideWindow(t *testing.T) {
@@ -512,7 +531,7 @@ func TestNewCustomerRestriction_blocksNewCustomerInsideWindow(t *testing.T) {
 		t.Fatalf("prepare: status %d body %v, want 403 with restriction message", status, body)
 	}
 
-	status, body = postJSONForTest(t, ts, "/api/bookings", createBookingPayload(start, end))
+	status, body = postJSONForTest(t, ts, "/api/bookings", createBookingPayload(t, start, end))
 	if status != http.StatusForbidden || body["error"] != "Closed for vacation" {
 		t.Fatalf("create: status %d body %v, want 403 with restriction message", status, body)
 	}
@@ -587,7 +606,7 @@ func TestNewCustomerRestriction_returningCustomerAllowed(t *testing.T) {
 	if status != http.StatusOK {
 		t.Fatalf("prepare: status %d body %v, want 200 for returning customer", status, body)
 	}
-	status, body = postJSONForTest(t, ts, "/api/bookings", createBookingPayload(start, end))
+	status, body = postJSONForTest(t, ts, "/api/bookings", createBookingPayload(t, start, end))
 	if status != http.StatusCreated {
 		t.Fatalf("create: status %d body %v, want 201 for returning customer", status, body)
 	}

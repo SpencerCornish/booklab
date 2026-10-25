@@ -6,9 +6,8 @@
 # Never touches any real .env: it swaps in a disposable one and restores the
 # original afterwards. Data lives in a temp dir, not ./data/postgres.
 set -euo pipefail
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 # shellcheck source=tests/scripts/lib.sh
-source "$ROOT/tests/scripts/lib.sh"
+source "${ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}/tests/scripts/lib.sh"
 
 COMPOSE_CMD="${FUNCTEST_COMPOSE_CMD:-docker compose}"
 # The override only disables SELinux volume labeling (rootless podman); it
@@ -69,7 +68,7 @@ for _ in $(seq 1 120); do
   if curl -sf "http://localhost:$SMOKE_PORT/api/health" >/dev/null 2>&1; then break; fi
   sleep 1
 done
-if ! curl -sf "http://localhost:$SMOKE_PORT/api/health" >/dev/null 2>&1; then
+if ! wait_healthy "http://localhost:$SMOKE_PORT/api/health" 1; then
   echo "smoke: stack never became healthy" >&2
   "${COMPOSE[@]}" logs --tail 40 || true
   exit 1

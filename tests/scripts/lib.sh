@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Shared functional-test configuration. Sourced by every script in this directory.
 # All values can be overridden via environment variables (used by CI to map ports).
+ROOT="${ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 FUNCTEST_PROJECT="${FUNCTEST_PROJECT:-booklab-functest}"
 FUNCTEST_POSTGRES_PORT="${FUNCTEST_POSTGRES_PORT:-5433}"
 FUNCTEST_SMTP_PORT="${FUNCTEST_SMTP_PORT:-1026}"
@@ -23,4 +24,16 @@ app_base_url() {
 
 mailpit_base_url() {
   echo "http://localhost:${FUNCTEST_MAILPIT_UI_PORT}"
+}
+
+# wait_healthy <url> [timeout_seconds] — poll until a URL answers, non-zero on timeout.
+wait_healthy() {
+  local url="$1" timeout="${2:-60}"
+  local deadline=$(( $(date +%s) + timeout ))
+  while [ "$(date +%s)" -lt "$deadline" ]; do
+    curl -sf "$url" >/dev/null 2>&1 && return 0
+    sleep 0.5
+  done
+  echo "timeout waiting for $url" >&2
+  return 1
 }
