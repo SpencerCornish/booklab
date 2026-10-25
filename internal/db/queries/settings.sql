@@ -23,6 +23,14 @@ UPDATE settings SET
     new_customer_block_message  = COALESCE(sqlc.narg('new_customer_block_message'), new_customer_block_message),
     new_user_gate_enabled       = COALESCE(sqlc.narg('new_user_gate_enabled'), new_user_gate_enabled),
     new_user_gate_question      = COALESCE(sqlc.narg('new_user_gate_question'), new_user_gate_question),
-    new_user_gate_schedule      = COALESCE(sqlc.narg('new_user_gate_schedule'), new_user_gate_schedule)
+    new_user_gate_schedule      = COALESCE(sqlc.narg('new_user_gate_schedule'), new_user_gate_schedule),
+    secret_link_enabled         = COALESCE(sqlc.narg('secret_link_enabled'), secret_link_enabled),
+    secret_link_any_hours       = COALESCE(sqlc.narg('secret_link_any_hours'), secret_link_any_hours)
 WHERE id = 1
 RETURNING *;
+
+-- name: SetSecretLinkToken :one
+-- Only called by the admin rotate endpoint and the enable-time bootstrap, so
+-- the previous token is unconditionally replaced: rotation revokes the old
+-- link immediately.
+UPDATE settings SET secret_link_token = $1 WHERE id = 1 RETURNING *;

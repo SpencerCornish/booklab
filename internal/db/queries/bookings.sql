@@ -1,6 +1,8 @@
 -- name: CreateBooking :one
-INSERT INTO bookings (name, email, metadata, start_time, end_time, stripe_setup_intent_id, stripe_payment_method_id, is_new_user)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+-- One insert for both flows: paid bookings carry Stripe identifiers, free
+-- secret-link bookings leave them NULL with via_secret_link = TRUE.
+INSERT INTO bookings (name, email, metadata, start_time, end_time, stripe_setup_intent_id, stripe_payment_method_id, is_new_user, via_secret_link)
+VALUES ($1, $2, $3, $4, $5, sqlc.narg('setup_intent_id'), sqlc.narg('payment_method_id'), $8, $9)
 RETURNING *;
 
 -- name: GetBookingByID :one

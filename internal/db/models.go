@@ -41,6 +41,7 @@ type Booking struct {
 	CreatedAt             time.Time         `json:"created_at"`
 	UpdatedAt             time.Time         `json:"updated_at"`
 	IsNewUser             *bool             `json:"is_new_user"`
+	ViaSecretLink         bool              `json:"via_secret_link"`
 }
 
 type Closure struct {
@@ -84,6 +85,9 @@ type Settings struct {
 	NewUserGateEnabled      bool            `json:"new_user_gate_enabled"`
 	NewUserGateQuestion     string          `json:"new_user_gate_question"`
 	NewUserGateSchedule     []NewUserWindow `json:"new_user_gate_schedule"`
+	SecretLinkEnabled       bool            `json:"secret_link_enabled"`
+	SecretLinkToken         *string         `json:"secret_link_token"`
+	SecretLinkAnyHours      bool            `json:"secret_link_any_hours"`
 }
 
 type AdminUser struct {

@@ -31,7 +31,8 @@ func (q *Queries) GetSettings(ctx context.Context) (*Settings, error) {
 		bookable_start, bookable_end, min_hours, max_hours, reminder_hours_before, notification_emails,
 		auto_charge_delay_minutes, referral_sources, terms_content, privacy_content,
 		new_customer_block_start, new_customer_block_end, new_customer_block_message, min_lead_hours,
-		new_user_gate_enabled, new_user_gate_question, new_user_gate_schedule
+		new_user_gate_enabled, new_user_gate_question, new_user_gate_schedule,
+		secret_link_enabled, secret_link_token, secret_link_any_hours
 		FROM settings WHERE id = 1`)
 	return scanSettings(row)
 }
@@ -61,6 +62,8 @@ type UpdateSettingsParams struct {
 	NewUserGateEnabled      *bool
 	NewUserGateQuestion     *string
 	NewUserGateSchedule     *[]NewUserWindow
+	SecretLinkEnabled       *bool
+	SecretLinkAnyHours      *bool
 }
 
 func (q *Queries) UpdateSettings(ctx context.Context, p UpdateSettingsParams) (*Settings, error) {
@@ -90,14 +93,17 @@ func (q *Queries) UpdateSettings(ctx context.Context, p UpdateSettingsParams) (*
 			min_lead_hours              = COALESCE($19, min_lead_hours),
 			new_user_gate_enabled       = COALESCE($20, new_user_gate_enabled),
 			new_user_gate_question      = COALESCE($21, new_user_gate_question),
-			new_user_gate_schedule      = COALESCE(($22::text)::jsonb, new_user_gate_schedule)
+			new_user_gate_schedule      = COALESCE(($22::text)::jsonb, new_user_gate_schedule),
+			secret_link_enabled         = COALESCE($23, secret_link_enabled),
+			secret_link_any_hours       = COALESCE($24, secret_link_any_hours)
 		WHERE id = 1
 		RETURNING id, resource_name, hourly_rate_cents, currency, timezone,
 			bookable_start, bookable_end, min_hours, max_hours, reminder_hours_before,
 			notification_emails, auto_charge_delay_minutes, referral_sources,
 			terms_content, privacy_content,
 			new_customer_block_start, new_customer_block_end, new_customer_block_message, min_lead_hours,
-			new_user_gate_enabled, new_user_gate_question, new_user_gate_schedule`,
+			new_user_gate_enabled, new_user_gate_question, new_user_gate_schedule,
+			secret_link_enabled, secret_link_token, secret_link_any_hours`,
 		p.ResourceName, p.HourlyRateCents, p.Currency, p.Timezone,
 		p.BookableStart, p.BookableEnd, p.MinHours, p.MaxHours, p.ReminderHoursBefore,
 		p.NotificationEmails, p.AutoChargeDelayMinutes, p.ReferralSources,
@@ -105,7 +111,25 @@ func (q *Queries) UpdateSettings(ctx context.Context, p UpdateSettingsParams) (*
 		p.NewCustomerBlockSet, p.NewCustomerBlockStart, p.NewCustomerBlockEnd, p.NewCustomerBlockMessage,
 		p.MinLeadHours,
 		p.NewUserGateEnabled, p.NewUserGateQuestion, scheduleParam,
+		p.SecretLinkEnabled, p.SecretLinkAnyHours,
 	)
+	return scanSettings(row)
+}
+
+// SetSecretLinkToken stores a freshly generated (or rotated) link token. It is
+// only called by the admin rotate endpoint and the enable-time bootstrap, never
+// with arbitrary client input, so the previous token is unconditionally
+// replaced: rotation revokes the old link immediately.
+func (q *Queries) SetSecretLinkToken(ctx context.Context, token string) (*Settings, error) {
+	row := q.pool.QueryRow(ctx, `
+		UPDATE settings SET secret_link_token = $1 WHERE id = 1
+		RETURNING id, resource_name, hourly_rate_cents, currency, timezone,
+			bookable_start, bookable_end, min_hours, max_hours, reminder_hours_before,
+			notification_emails, auto_charge_delay_minutes, referral_sources,
+			terms_content, privacy_content,
+			new_customer_block_start, new_customer_block_end, new_customer_block_message, min_lead_hours,
+			new_user_gate_enabled, new_user_gate_question, new_user_gate_schedule,
+			secret_link_enabled, secret_link_token, secret_link_any_hours`, token)
 	return scanSettings(row)
 }
 
@@ -139,6 +163,7 @@ func scanSettings(row pgx.Row) (*Settings, error) {
 		&s.NewCustomerBlockStart, &s.NewCustomerBlockEnd, &s.NewCustomerBlockMessage,
 		&s.MinLeadHours,
 		&s.NewUserGateEnabled, &s.NewUserGateQuestion, &scheduleRaw,
+		&s.SecretLinkEnabled, &s.SecretLinkToken, &s.SecretLinkAnyHours,
 	)
 	if err != nil {
 		return nil, err
@@ -159,20 +184,32 @@ func scanSettings(row pgx.Row) (*Settings, error) {
 
 // ----- Bookings -----
 
-func (q *Queries) CreateBooking(ctx context.Context, name, email string, metadata map[string]string, start, end time.Time, setupIntentID, paymentMethodID string, isNewUser *bool) (*Booking, error) {
+// CreateBookingParams carries the insert fields for both booking flows: paid
+// (Stripe setup intent + payment method) and free secret-link bookings, where
+// the Stripe fields stay nil and ViaSecretLink is true. One query serves both
+// so the two paths cannot drift.
+type CreateBookingParams struct {
+	Name            string
+	Email           string
+	Metadata        map[string]string
+	Start           time.Time
+	End             time.Time
+	SetupIntentID   *string
+	PaymentMethodID *string
+	IsNewUser       *bool
+	ViaSecretLink   bool
+}
+
+func (q *Queries) CreateBooking(ctx context.Context, p CreateBookingParams) (*Booking, error) {
 	// metadata is NOT NULL; a nil map would otherwise be written as SQL NULL.
-	if metadata == nil {
-		metadata = map[string]string{}
-	}
-	var pm any
-	if paymentMethodID != "" {
-		pm = paymentMethodID
+	if p.Metadata == nil {
+		p.Metadata = map[string]string{}
 	}
 	row := q.pool.QueryRow(ctx, `
-		INSERT INTO bookings (name, email, metadata, start_time, end_time, stripe_setup_intent_id, stripe_payment_method_id, is_new_user)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		INSERT INTO bookings (name, email, metadata, start_time, end_time, stripe_setup_intent_id, stripe_payment_method_id, is_new_user, via_secret_link)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 		RETURNING `+bookingColumns,
-		name, email, metadata, start, end, setupIntentID, pm, isNewUser,
+		p.Name, p.Email, p.Metadata, p.Start, p.End, p.SetupIntentID, p.PaymentMethodID, p.IsNewUser, p.ViaSecretLink,
 	)
 	return scanBooking(row)
 }
@@ -297,14 +334,16 @@ func (q *Queries) UpdateBookingCharged(ctx context.Context, id int32, paymentInt
 }
 
 // CompleteExpiredBookings transitions all confirmed bookings whose end_time has
-// passed (and have a payment method on file) to completed, returning them so
-// the caller can send staff notification emails.
+// passed to completed, returning them so the caller can send staff notification
+// emails. Bookings are eligible with either a payment method on file (paid
+// flow) or the secret-link marker (free flow); a paid booking that somehow
+// lost its payment method is left alone instead of silently completing.
 func (q *Queries) CompleteExpiredBookings(ctx context.Context) ([]*Booking, error) {
 	rows, err := q.pool.Query(ctx, `
 		UPDATE bookings SET status = 'completed', completed_at = NOW()
 		WHERE status = 'confirmed'
 		  AND end_time < NOW()
-		  AND stripe_payment_method_id IS NOT NULL
+		  AND (stripe_payment_method_id IS NOT NULL OR via_secret_link = TRUE)
 		RETURNING `+bookingColumns)
 	if err != nil {
 		return nil, err
@@ -426,7 +465,8 @@ func (q *Queries) CancelBooking(ctx context.Context, token uuid.UUID) (*Booking,
 const bookingColumns = `id, name, email, metadata, start_time, end_time, status, cancel_token,
 	stripe_setup_intent_id, stripe_payment_method_id, stripe_payment_intent_id,
 	stripe_receipt_url, amount_cents, reminder_sent, completed_at,
-	charge_attempts, last_charge_error, charge_idempotency_key, created_at, updated_at, is_new_user`
+	charge_attempts, last_charge_error, charge_idempotency_key, created_at, updated_at, is_new_user,
+	via_secret_link`
 
 func scanBooking(row pgx.Row) (*Booking, error) {
 	var b Booking
@@ -435,6 +475,7 @@ func scanBooking(row pgx.Row) (*Booking, error) {
 		&b.StripeSetupIntentID, &b.StripePaymentMethodID, &b.StripePaymentIntentID,
 		&b.StripeReceiptURL, &b.AmountCents, &b.ReminderSent, &b.CompletedAt,
 		&b.ChargeAttempts, &b.LastChargeError, &b.ChargeIdempotencyKey, &b.CreatedAt, &b.UpdatedAt, &b.IsNewUser,
+		&b.ViaSecretLink,
 	)
 	if err != nil {
 		return nil, err
