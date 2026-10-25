@@ -199,6 +199,11 @@ function BookingStatusBadges({ booking }: { booking: BookingAdmin }) {
       <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium capitalize ${statusColors[booking.status] ?? 'bg-gray-100 text-gray-500'}`}>
         {booking.status}
       </span>
+      {booking.via_secret_link && (
+        <span className="inline-block px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-700">
+          Free · Studio booking
+        </span>
+      )}
       {failures > 0 && booking.status !== 'charged' && (
         <span
           className="inline-block px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-700 cursor-help"
@@ -240,6 +245,15 @@ function BookingChargeTiming({
     ? `Done ${format(new Date(booking.completed_at), 'MMM d, h:mm a')}`
     : `Done: ${format(new Date(booking.completed_at), 'MMM d, h:mm a')}`
 
+  // Free studio bookings are never charged, so no auto-charge timeline.
+  if (booking.via_secret_link) {
+    return (
+      <div className={compact ? 'text-xs' : 'text-xs whitespace-nowrap'}>
+        <p className="text-gray-500">{doneLabel}</p>
+      </div>
+    )
+  }
+
   return (
     <div className={compact ? 'text-xs' : 'text-xs whitespace-nowrap'}>
       <p className="text-gray-500">{doneLabel}</p>
@@ -257,6 +271,11 @@ function BookingChargeTiming({
 }
 
 function BookingPaymentInfo({ booking, onLinkClick }: { booking: BookingAdmin; onLinkClick?: (e: React.MouseEvent) => void }) {
+  // Free secret-link bookings have a NULL amount and no payment method — render
+  // that as "Free" so the row is never indistinguishable from a broken one.
+  if (booking.via_secret_link) {
+    return <span className="text-xs font-medium text-emerald-600">Free</span>
+  }
   if (booking.amount_cents) {
     return (
       <span className="text-xs text-gray-500">
@@ -310,14 +329,15 @@ function BookingActions({
             Charge
           </button>
         )}
-      {booking.status === 'confirmed' && booking.stripe_payment_method_id && (
-        <button
-          onClick={onMarkDone}
-          className={`${btn} bg-gray-100 text-gray-700 hover:bg-gray-200`}
-        >
-          Mark done
-        </button>
-      )}
+      {booking.status === 'confirmed' &&
+        (booking.stripe_payment_method_id || booking.via_secret_link) && (
+          <button
+            onClick={onMarkDone}
+            className={`${btn} bg-gray-100 text-gray-700 hover:bg-gray-200`}
+          >
+            Mark done
+          </button>
+        )}
       {(booking.status === 'confirmed' || booking.status === 'completed') && (
         <button
           onClick={onCancel}
@@ -370,7 +390,7 @@ function BookingDetailPanel({
           {booking.completed_at && (
             <p><span className="text-gray-400 mr-1">Completed</span>{format(new Date(booking.completed_at), 'MMM d, yyyy h:mm a')}</p>
           )}
-          {autoChargeAt && booking.status !== 'charged' && (
+          {autoChargeAt && !booking.via_secret_link && booking.status !== 'charged' && (
             <p>
               <span className="text-gray-400 mr-1">Auto-charge at</span>
               <span className={autoChargeInFuture ? 'text-amber-600' : 'text-red-500'}>
@@ -434,7 +454,11 @@ function BookingCard({
   const { autoChargeAt, autoChargeInFuture } = getAutoChargeInfo(booking, settings)
   const metadataEntries = Object.entries(booking.metadata ?? {})
   const isOverdue =
-    autoChargeAt && !autoChargeInFuture && booking.status !== 'charged' && booking.completed_at
+    !booking.via_secret_link &&
+    autoChargeAt &&
+    !autoChargeInFuture &&
+    booking.status !== 'charged' &&
+    booking.completed_at
 
   return (
     <div

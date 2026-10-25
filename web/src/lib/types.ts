@@ -36,6 +36,20 @@ export interface PublicSettings {
   new_user_gate?: NewUserGate | null
 }
 
+export interface SecretLinkSettings {
+  enabled: boolean
+  allow_outside_hours: boolean
+  token: string | null
+  url: string | null
+}
+
+/** GET /api/secret-link/verify — valid is false for disabled/mismatched tokens. */
+export interface SecretLinkVerifyResponse {
+  valid: boolean
+  resource_name?: string
+  any_hours?: boolean
+}
+
 export interface Settings extends PublicSettings {
   reminder_hours_before: number
   notification_emails: string
@@ -43,6 +57,7 @@ export interface Settings extends PublicSettings {
   terms_content: string
   privacy_content: string
   new_user_gate: NewUserGateAdmin | null
+  secret_link: SecretLinkSettings | null
 }
 
 export interface ReferralSourceCount {
@@ -110,6 +125,7 @@ export interface BookingAdmin extends BookingPublic {
   charge_attempts?: number
   last_charge_error?: string
   is_new_user?: boolean | null
+  via_secret_link?: boolean
 }
 
 export interface PrepareBookingResponse {

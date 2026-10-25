@@ -20,6 +20,7 @@ export default function App() {
         {/* Public */}
         <Route path="/" element={<BookingPage />} />
         <Route path="/booking/:token" element={<ViewBookingPage />} />
+        <Route path="/book/:secretToken" element={<BookingPage />} />
         <Route path="/cancel/:token" element={<CancelPage />} />
         <Route path="/terms" element={<TermsPage />} />
         <Route path="/privacy" element={<PrivacyPage />} />

@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { format, parseISO } from 'date-fns'
-import { loadStripe } from '@stripe/stripe-js'
+import { loadStripe, type Stripe } from '@stripe/stripe-js'
 import { Elements, CardElement, useStripe, useElements } from '@stripe/react-stripe-js'
+import { useParams } from 'react-router'
 import { DatePicker } from '../components/DatePicker'
 import { TimeSlotPicker } from '../components/TimeSlotPicker'
 import { Footer } from '../components/Footer'
@@ -11,21 +12,65 @@ import {
   getAvailableDates,
   prepareBooking,
   createBooking,
+  verifySecretLink,
   ApiError,
 } from '../lib/api'
 import type { PublicSettings, AvailabilityResponse, BookingPublic, NewCustomerRestriction } from '../lib/types'
 
-// Stripe publishable key from env (set in .env or via Vite)
-const stripePromise = loadStripe(import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY ?? '')
+// Stripe publishable key from env (set in .env or via Vite). Created lazily so
+// secret-link visitors never trigger the Stripe script load at all.
+let stripePromise: Promise<Stripe | null> | null = null
+const getStripePromise = () => {
+  if (!stripePromise) {
+    stripePromise = loadStripe(import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY ?? '')
+  }
+  return stripePromise
+}
 
 export default function BookingPage() {
+  // /book/:secretToken serves the same page in studio-link mode; no token
+  // means the standard paid flow.
+  const { secretToken } = useParams()
+
+  // null = still checking; false = invalid link; otherwise the link details.
+  const [linkState, setLinkState] = useState<
+    | { status: 'checking' }
+    | { status: 'invalid' }
+    | { status: 'valid'; resourceName: string; anyHours: boolean }
+  >(secretToken ? { status: 'checking' } : { status: 'valid', resourceName: '', anyHours: false })
+
   const [settings, setSettings] = useState<PublicSettings | null>(null)
 
   useEffect(() => {
     getPublicSettings().then(setSettings).catch(console.error)
   }, [])
 
-  if (!settings) {
+  useEffect(() => {
+    if (!secretToken) return
+    let cancelled = false
+    verifySecretLink(secretToken)
+      .then((res) => {
+        if (cancelled) return
+        if (res.valid) {
+          setLinkState({
+            status: 'valid',
+            resourceName: res.resource_name ?? '',
+            anyHours: res.any_hours ?? false,
+          })
+        } else {
+          setLinkState({ status: 'invalid' })
+        }
+      })
+      .catch((err) => {
+        console.error(err)
+        if (!cancelled) setLinkState({ status: 'invalid' })
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [secretToken])
+
+  if (linkState.status === 'checking' || !settings) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" />
@@ -33,25 +78,62 @@ export default function BookingPage() {
     )
   }
 
+  if (linkState.status === 'invalid') {
+    return (
+      <div className="min-h-screen flex items-center justify-center px-4">
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-8 max-w-md text-center">
+          <div className="w-16 h-16 rounded-full bg-red-100 flex items-center justify-center mx-auto mb-4">
+            <svg className="w-8 h-8 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </div>
+          <h1 className="text-xl font-bold text-gray-900 mb-2">Link no longer valid</h1>
+          <p className="text-sm text-gray-500">
+            This booking link is invalid or has expired. Please ask the studio for a current link.
+          </p>
+        </div>
+      </div>
+    )
+  }
+
+  const isSecretLink = !!secretToken
+
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">
       <header className="bg-white border-b border-gray-200 px-4 py-5">
         <div className="max-w-2xl mx-auto">
-          <h1 className="text-2xl font-bold text-gray-900">Book {settings.resource_name}</h1>
-          <p className="text-sm text-gray-500 mt-1">
-            ${(settings.hourly_rate_cents / 100).toFixed(0)}/hr · Payment collected after your session
-          </p>
+          <h1 className="text-2xl font-bold text-gray-900">
+            {isSecretLink ? `Book ${linkState.resourceName} (Studio Artist)` : `Book ${settings.resource_name}`}
+          </h1>
+          {isSecretLink ? (
+            <p className="text-sm text-gray-500 mt-1">Studio booking · No payment required</p>
+          ) : (
+            <p className="text-sm text-gray-500 mt-1">
+              ${(settings.hourly_rate_cents / 100).toFixed(0)}/hr · Payment collected after your session
+            </p>
+          )}
         </div>
       </header>
 
-      {settings.new_customer_restriction && (
+      {!isSecretLink && settings.new_customer_restriction && (
         <NewCustomerNotice restriction={settings.new_customer_restriction} />
       )}
 
       <div className="flex-1">
-        <Elements stripe={stripePromise}>
-          <BookingForm settings={settings} />
-        </Elements>
+        {isSecretLink ? (
+          // Link mode renders no Stripe wrapper at all — the payment code path
+          // is provably absent rather than merely hidden.
+          <BookingForm
+            settings={settings}
+            isSecretLink
+            secretToken={secretToken!}
+            linkAnyHours={linkState.anyHours}
+          />
+        ) : (
+          <Elements stripe={getStripePromise()}>
+            <BookingForm settings={settings} isSecretLink={false} />
+          </Elements>
+        )}
       </div>
 
       <Footer />
@@ -133,7 +215,17 @@ function NewCustomerNotice({ restriction }: { restriction: NewCustomerRestrictio
   )
 }
 
-function BookingForm({ settings }: { settings: PublicSettings }) {
+function BookingForm({
+  settings,
+  isSecretLink,
+  secretToken,
+  linkAnyHours,
+}: {
+  settings: PublicSettings
+  isSecretLink: boolean
+  secretToken?: string
+  linkAnyHours?: boolean
+}) {
   const stripe = useStripe()
   const elements = useElements()
 
@@ -157,10 +249,11 @@ function BookingForm({ settings }: { settings: PublicSettings }) {
   const submittingRef = useRef(false)
 
   // Self-reported answer to the optional pre-schedule question. null = unanswered.
+  // Secret-link bookings skip the gate entirely.
   const [isNewUser, setIsNewUser] = useState<boolean | null>(null)
-  const gate = settings.new_user_gate ?? null
+  const gate = !isSecretLink ? (settings.new_user_gate ?? null) : null
   const gateEnabled = !!gate
-  const answered = !gateEnabled || isNewUser !== null
+  const answered = isSecretLink || !gateEnabled || isNewUser !== null
   const stepOffset = gateEnabled ? 1 : 0
 
   useEffect(() => {
@@ -170,7 +263,7 @@ function BookingForm({ settings }: { settings: PublicSettings }) {
     setAvailability(null)
     setSelectedStart(null)
     setSelectedEnd(null)
-    getAvailability(date, gateEnabled ? isNewUser === true : undefined)
+    getAvailability(date, gateEnabled ? isNewUser === true : undefined, isSecretLink ? secretToken : undefined)
       .then((data) => {
         if (!cancelled) setAvailability(data)
       })
@@ -184,7 +277,7 @@ function BookingForm({ settings }: { settings: PublicSettings }) {
     return () => {
       cancelled = true
     }
-  }, [date, isNewUser, gateEnabled, answered])
+  }, [date, isNewUser, gateEnabled, answered, isSecretLink, secretToken])
 
   // Which upcoming days have any bookable time, so the date strip can grey out
   // the rest. Refetched when the answer (and thus the hours that apply) changes.
@@ -193,7 +286,7 @@ function BookingForm({ settings }: { settings: PublicSettings }) {
     if (!answered) return
     setAvailableDates(undefined)
     let cancelled = false
-    getAvailableDates(60, gateEnabled ? isNewUser === true : undefined)
+    getAvailableDates(60, gateEnabled ? isNewUser === true : undefined, isSecretLink ? secretToken : undefined)
       .then((d) => {
         if (!cancelled) setAvailableDates(new Set(d.available_dates))
       })
@@ -201,7 +294,7 @@ function BookingForm({ settings }: { settings: PublicSettings }) {
     return () => {
       cancelled = true
     }
-  }, [isNewUser, gateEnabled, answered])
+  }, [isNewUser, gateEnabled, answered, isSecretLink, secretToken])
 
   // Land on the first bookable day instead of a default that may be greyed out.
   // The backend returns dates ascending, so the set's first value is the earliest.
@@ -213,7 +306,8 @@ function BookingForm({ settings }: { settings: PublicSettings }) {
   }, [availableDates, date])
 
   // Dates are YYYY-MM-DD in the booking timezone, so string comparison is a date comparison.
-  const restriction = settings.new_customer_restriction
+  // The new-customer notice never applies to secret-link bookings.
+  const restriction = isSecretLink ? null : settings.new_customer_restriction
   const dateRestricted = !!restriction && date >= restriction.start_date && date <= restriction.end_date
 
   const handleSlotSelect = (start: string, end: string) => {
@@ -223,8 +317,9 @@ function BookingForm({ settings }: { settings: PublicSettings }) {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!stripe || !elements || !selectedStart || !selectedEnd || !answered) return
+    if (!selectedStart || !selectedEnd || !answered) return
     if (submittingRef.current) return
+    if (!isSecretLink && (!stripe || !elements)) return
 
     submittingRef.current = true
     setSubmitting(true)
@@ -242,6 +337,21 @@ function BookingForm({ settings }: { settings: PublicSettings }) {
       }
 
       const newUserParam = gateEnabled ? isNewUser === true : undefined
+
+      if (isSecretLink) {
+        // Free studio booking: submit directly, no Stripe handoff at all.
+        const { booking } = await createBooking({
+          name,
+          email,
+          metadata,
+          start_time: selectedStart,
+          end_time: selectedEnd,
+          secret_token: secretToken,
+        })
+        setSuccess(booking)
+        return
+      }
+
       const { setup_intent_client_secret, setup_intent_id } = await prepareBooking({
         email,
         start_time: selectedStart,
@@ -249,10 +359,10 @@ function BookingForm({ settings }: { settings: PublicSettings }) {
         new_user: newUserParam,
       })
 
-      const cardElement = elements.getElement(CardElement)
+      const cardElement = elements!.getElement(CardElement)
       if (!cardElement) throw new Error('Card element not found')
 
-      const { error: stripeError } = await stripe.confirmCardSetup(setup_intent_client_secret, {
+      const { error: stripeError } = await stripe!.confirmCardSetup(setup_intent_client_secret, {
         payment_method: { card: cardElement, billing_details: { name, email } },
       })
 
@@ -273,6 +383,12 @@ function BookingForm({ settings }: { settings: PublicSettings }) {
 
       setSuccess(booking)
     } catch (err) {
+      if (isSecretLink && err instanceof ApiError && err.status === 409) {
+        // The free flow has no idempotency key: a network retry after a
+        // succeeded create lands here. Present it as "already booked".
+        setError('This time slot appears to be booked already — the booking likely went through on the first attempt.')
+        return
+      }
       setError(err instanceof ApiError ? err.message : 'Something went wrong')
     } finally {
       submittingRef.current = false
@@ -298,7 +414,7 @@ function BookingForm({ settings }: { settings: PublicSettings }) {
           </p>
           <p className="text-sm text-gray-400 mt-4">
             A confirmation email has been sent to <strong>{success.email}</strong>.
-            Payment will be collected after your session.
+            {isSecretLink ? ' No payment required.' : ' Payment will be collected after your session.'}
           </p>
         </div>
       </div>
@@ -378,9 +494,14 @@ function BookingForm({ settings }: { settings: PublicSettings }) {
           <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">
             {stepOffset + 2}. Choose a time
           </h2>
-          {settings.min_lead_hours > 0 && (
+          {!isSecretLink && settings.min_lead_hours > 0 && (
             <p className="text-sm text-gray-500 mb-3">
               Bookings must be made at least {settings.min_lead_hours} {settings.min_lead_hours === 1 ? 'hour' : 'hours'} in advance.
+            </p>
+          )}
+          {isSecretLink && linkAnyHours && (
+            <p className="text-sm text-gray-500 mb-3">
+              Studio access is available 24/7 for this link.
             </p>
           )}
           {loadingSlots ? (
@@ -418,8 +539,8 @@ function BookingForm({ settings }: { settings: PublicSettings }) {
         </section>
       )}
 
-      {/* Estimated total */}
-      {answered && selectedStart && selectedEnd && (() => {
+      {/* Estimated total (paid flow only — link bookings are free) */}
+      {answered && !isSecretLink && selectedStart && selectedEnd && (() => {
         const hours = Math.max(1, Math.round(
           (new Date(selectedEnd).getTime() - new Date(selectedStart).getTime()) / 3600000
         ))
@@ -485,7 +606,7 @@ function BookingForm({ settings }: { settings: PublicSettings }) {
               />
             </div>
 
-            {settings.referral_sources.length > 0 && (
+            {settings.referral_sources.length > 0 && !isSecretLink && (
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   How did you hear about us? <span className="text-gray-400 font-normal">(optional)</span>
@@ -519,21 +640,29 @@ function BookingForm({ settings }: { settings: PublicSettings }) {
               </div>
             )}
 
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Card</label>
-              <div className="rounded-lg border border-gray-300 px-3 py-3">
-                <CardElement
-                  options={{
-                    style: {
-                      base: { fontSize: '14px', color: '#374151', '::placeholder': { color: '#9ca3af' } },
-                    },
-                  }}
-                />
+            {!isSecretLink && (
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Card</label>
+                <div className="rounded-lg border border-gray-300 px-3 py-3">
+                  <CardElement
+                    options={{
+                      style: {
+                        base: { fontSize: '14px', color: '#374151', '::placeholder': { color: '#9ca3af' } },
+                      },
+                    }}
+                  />
+                </div>
+                <p className="text-xs text-gray-400 mt-1">
+                  Your card won't be charged until after your session.
+                </p>
               </div>
-              <p className="text-xs text-gray-400 mt-1">
-                Your card won't be charged until after your session.
+            )}
+
+            {isSecretLink && (
+              <p className="text-sm text-green-700 font-medium">
+                Free studio booking — no card or payment needed.
               </p>
-            </div>
+            )}
 
             {error && (
               <div className="rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm px-3 py-2">
@@ -573,10 +702,10 @@ function BookingForm({ settings }: { settings: PublicSettings }) {
 
             <button
               type="submit"
-              disabled={submitting || !stripe || !acceptedTerms}
+              disabled={submitting || (!isSecretLink && !stripe) || !acceptedTerms}
               className="w-full bg-blue-600 text-white rounded-lg py-2.5 font-medium text-sm hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
-              {submitting ? 'Confirming…' : 'Confirm Booking'}
+              {submitting ? 'Confirming…' : isSecretLink ? 'Confirm Studio Booking' : 'Confirm Booking'}
             </button>
           </div>
         </section>

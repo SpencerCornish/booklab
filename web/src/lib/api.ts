@@ -10,6 +10,7 @@ import type {
   InsightsData,
   PrepareBookingResponse,
   PublicSettings,
+  SecretLinkVerifyResponse,
   Settings,
 } from './types'
 
@@ -55,15 +56,21 @@ export class ApiError extends Error {
 export const getPublicSettings = () => request<PublicSettings>('/settings/public')
 export const getTerms = () => request<{ content: string }>('/terms')
 export const getPrivacy = () => request<{ content: string }>('/privacy')
-export const getAvailability = (date: string, newUser?: boolean) => {
+
+export const verifySecretLink = (token: string) =>
+  request<SecretLinkVerifyResponse>(`/secret-link/verify?token=${encodeURIComponent(token)}`)
+
+export const getAvailability = (date: string, newUser?: boolean, secretToken?: string) => {
   const params = new URLSearchParams({ date })
   if (newUser !== undefined) params.set('new_user', String(newUser))
+  if (secretToken) params.set('secret_token', secretToken)
   return request<AvailabilityResponse>(`/availability?${params.toString()}`)
 }
 
-export const getAvailableDates = (days = 60, newUser?: boolean) => {
+export const getAvailableDates = (days = 60, newUser?: boolean, secretToken?: string) => {
   const params = new URLSearchParams({ days: String(days) })
   if (newUser !== undefined) params.set('new_user', String(newUser))
+  if (secretToken) params.set('secret_token', secretToken)
   return request<AvailableDatesResponse>(`/availability/days?${params.toString()}`)
 }
 
@@ -79,13 +86,15 @@ export const prepareBooking = (body: {
   })
 
 export const createBooking = (body: {
-  setup_intent_id: string
+  // Required for the paid flow; secret-link bookings carry a token instead.
+  setup_intent_id?: string
   name: string
   email: string
   metadata?: Record<string, string>
   start_time: string
   end_time: string
   new_user?: boolean
+  secret_token?: string
 }) =>
   request<FinalizeBookingResponse>('/bookings', {
     method: 'POST',
@@ -139,6 +148,9 @@ export const adminUpdateSettings = (body: Partial<Settings>) =>
   })
 
 export const adminGetInsights = () => request<InsightsData>('/admin/insights')
+
+export const adminRotateSecretLink = () =>
+  request<{ token: string; url: string }>('/admin/secret-link/rotate', { method: 'POST' })
 
 export const adminListClosures = () => request<Closure[]>('/admin/closures')
 export const adminCreateClosure = (body: {

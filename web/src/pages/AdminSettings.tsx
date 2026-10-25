@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Navigate, NavLink, useParams } from 'react-router'
-import { adminGetSettings, adminUpdateSettings, ApiError } from '../lib/api'
-import type { NewCustomerRestriction, NewUserGateAdmin, NewUserWindow, Settings } from '../lib/types'
+import { adminGetSettings, adminRotateSecretLink, adminUpdateSettings, ApiError } from '../lib/api'
+import type { NewCustomerRestriction, NewUserGateAdmin, NewUserWindow, SecretLinkSettings, Settings } from '../lib/types'
 import { RichTextEditor } from '../components/RichTextEditor'
 
 export default function AdminSettings() {
@@ -111,6 +111,40 @@ export default function AdminSettings() {
       }
       return { ...prev, new_user_gate: { ...current, ...patch } }
     })
+
+  const secretLink: SecretLinkSettings = form.secret_link ?? {
+    enabled: false,
+    allow_outside_hours: false,
+    token: null,
+    url: null,
+  }
+
+  const updateSecretLink = (patch: Partial<SecretLinkSettings>) =>
+    setForm((prev) => {
+      const current: SecretLinkSettings = prev.secret_link ?? {
+        enabled: false,
+        allow_outside_hours: false,
+        token: null,
+        url: null,
+      }
+      return { ...prev, secret_link: { ...current, ...patch } }
+    })
+
+  // Issues a fresh token right away (revoking the old link) and updates the
+  // local state to match, since the rotate endpoint writes outside the normal
+  // settings save flow.
+  const rotateSecretLink = async () => {
+    if (!window.confirm('Generate a new link? The previous link will stop working immediately.')) return
+    setError(null)
+    try {
+      const rotated = await adminRotateSecretLink()
+      const next = { ...secretLink, token: rotated.token, url: rotated.url, enabled: true }
+      setForm((prev) => ({ ...prev, secret_link: next }))
+      setSettings((prev) => (prev ? { ...prev, secret_link: next } : prev))
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Rotate failed')
+    }
+  }
 
   if (loading || !settings) {
     return (
@@ -299,6 +333,74 @@ export default function AdminSettings() {
           </div>
         </section>
 
+        <section id="secret-link" className="scroll-mt-16 md:scroll-mt-6">
+          <h2 className="text-lg font-semibold text-gray-900 mb-3">Secret studio link</h2>
+          <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-4">
+            <label className="flex items-start gap-2 text-sm text-gray-700">
+              <input
+                type="checkbox"
+                checked={secretLink.enabled}
+                onChange={(e) => updateSecretLink({ enabled: e.target.checked })}
+                className="mt-0.5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+              />
+              <span>
+                Enable a secret booking link for studio artists: free bookings (no card, no charge) with no
+                minimum notice.
+              </span>
+            </label>
+            {secretLink.enabled && (
+              <>
+                <label className="flex items-start gap-2 text-sm text-gray-700">
+                  <input
+                    type="checkbox"
+                    checked={secretLink.allow_outside_hours}
+                    onChange={(e) => updateSecretLink({ allow_outside_hours: e.target.checked })}
+                    className="mt-0.5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                  />
+                  <span>
+                    Allow bookings outside regular hours (24/7 access). Closures and existing bookings still apply.
+                  </span>
+                </label>
+                <Field
+                  label="Secret link"
+                  hint="Share this URL with studio artists. Anyone with the link can book free sessions without a card."
+                >
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      readOnly
+                      value={secretLink.url ?? ''}
+                      className={`${inputClass} font-mono text-xs bg-gray-50`}
+                      placeholder="Save settings or rotate to generate a link"
+                    />
+                    {secretLink.url && (
+                      <button
+                        type="button"
+                        onClick={() => navigator.clipboard.writeText(secretLink.url!)}
+                        className="shrink-0 rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                      >
+                        Copy link
+                      </button>
+                    )}
+                  </div>
+                </Field>
+                <div className="flex items-start justify-between gap-3">
+                  <p className="text-xs text-gray-400">
+                    Regenerating revokes the old link immediately — anyone holding it loses access.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={rotateSecretLink}
+                    className="shrink-0 text-sm text-red-600 hover:text-red-800"
+                  >
+                    Regenerate link
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </section>
+
           </>
         )}
 
@@ -430,7 +532,7 @@ const SECTIONS: { key: SectionKey; label: string; fields: (keyof Settings)[] }[]
   {
     key: 'booking-rules',
     label: 'Booking rules',
-    fields: ['new_customer_restriction', 'new_user_gate'],
+    fields: ['new_customer_restriction', 'new_user_gate', 'secret_link'],
   },
   {
     key: 'operations',
