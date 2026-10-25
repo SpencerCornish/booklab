@@ -145,6 +145,47 @@ func TestPrepareBooking_rateLimitedPerIP(t *testing.T) {
 
 // After a charge fails with an unknown outcome, the retry must reuse the idempotency key so
 // Stripe replays the first request; after a definite decline, the retry gets a new key.
+// Booking creates are rate limited per client IP; idempotent replays of the same
+// setup_intent_id do not use up the budget.
+func TestCreateBooking_rateLimitedPerIP(t *testing.T) {
+	ctx := context.Background()
+	pool, q := openTestPool(t)
+	truncateBookingData(t, ctx, pool)
+	resetSettingsUTC(t, ctx, q)
+
+	emailSvc := emailsvc.New("127.0.0.1", 1025, "", "", "booklab@localhost", testLogger())
+	srv := New(testConfig(), q, stripetest.New(), emailSvc, nil, testLogger())
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+
+	// One payload per distinct day: bookings cannot overlap, so each needs its own slot.
+	payload := func(i int) string {
+		start := time.Date(2035, 6, 1+i, 12, 0, 0, 0, time.UTC)
+		return fmt.Sprintf(`{"setup_intent_id":%q,"name":"Pat","email":"pat@example.com","start_time":%q,"end_time":%q}`,
+			mintSetupIntentID(t), start.Format(time.RFC3339), start.Add(2*time.Hour).Format(time.RFC3339))
+	}
+	create := func(i int) int {
+		req := mustNewRequest(t, http.MethodPost, ts.URL+"/api/bookings", strings.NewReader(payload(i)))
+		resp := doReq(t, ts.Client(), req)
+		defer resp.Body.Close()
+		return resp.StatusCode
+	}
+
+	for i := 0; i < bookingCreateRateLimitMax; i++ {
+		if got := create(i); got != http.StatusCreated {
+			t.Fatalf("create %d: status %d want 201", i, got)
+		}
+	}
+	if got := create(99); got != http.StatusTooManyRequests {
+		t.Fatalf("create over limit: status %d want 429", got)
+	}
+
+	// Replaying an earlier setup_intent_id is idempotent and stays under the limit.
+	if got := create(0); got != http.StatusCreated {
+		t.Fatalf("idempotent replay over limit: status %d want 201", got)
+	}
+}
+
 func TestAdminChargeBooking_idempotencyKeyAcrossRetries(t *testing.T) {
 	ctx := context.Background()
 	pool, q := openTestPool(t)

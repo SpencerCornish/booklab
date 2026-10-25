@@ -27,6 +27,11 @@ const (
 	loginRateLimitMax    = 10
 )
 
+// dummyPasswordHash is compared against when the username does not exist, so an
+// unknown username costs the same bcrypt work as a wrong password and response
+// timing cannot reveal which admin usernames exist.
+var dummyPasswordHash, _ = bcrypt.GenerateFromPassword([]byte("booklab-dummy-password"), bcrypt.DefaultCost)
+
 func (s *Server) handleAdminLogin(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Username string `json:"username"`
@@ -67,6 +72,7 @@ func (s *Server) handleAdminLogin(w http.ResponseWriter, r *http.Request) {
 	user, err := s.queries.GetAdminByUsername(ctx, req.Username)
 	if err != nil {
 		if err == pgx.ErrNoRows {
+			_ = bcrypt.CompareHashAndPassword(dummyPasswordHash, []byte(req.Password))
 			s.writeError(w, r, http.StatusUnauthorized, "invalid credentials", nil)
 			return
 		}

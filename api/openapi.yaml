@@ -192,6 +192,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          description: Too many bookings created from this client IP in the last hour (limit 20). Idempotent replays of the same setup_intent_id do not count.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
 
   /bookings/{token}:
     get:

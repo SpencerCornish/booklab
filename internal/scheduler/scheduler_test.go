@@ -54,7 +54,7 @@ func TestAutoCharge_completed_concurrentOnlyOneCharge(t *testing.T) {
 	t.Cleanup(func() { pool.Close() })
 
 	q := db.New(pool)
-	if _, err := pool.Exec(ctx, `TRUNCATE login_attempts, booking_prepare_attempts, admin_sessions, admin_users, bookings, closures RESTART IDENTITY CASCADE`); err != nil {
+	if _, err := pool.Exec(ctx, `TRUNCATE login_attempts, booking_prepare_attempts, booking_create_attempts, admin_sessions, admin_users, bookings, closures RESTART IDENTITY CASCADE`); err != nil {
 		t.Fatal(err)
 	}
 	resetSettingsUTC(t, ctx, q)
@@ -118,7 +118,7 @@ func TestAutoCharge_unknownOutcomeRetryReusesKey(t *testing.T) {
 	t.Cleanup(func() { pool.Close() })
 
 	q := db.New(pool)
-	if _, err := pool.Exec(ctx, `TRUNCATE login_attempts, booking_prepare_attempts, admin_sessions, admin_users, bookings, closures RESTART IDENTITY CASCADE`); err != nil {
+	if _, err := pool.Exec(ctx, `TRUNCATE login_attempts, booking_prepare_attempts, booking_create_attempts, admin_sessions, admin_users, bookings, closures RESTART IDENTITY CASCADE`); err != nil {
 		t.Fatal(err)
 	}
 	resetSettingsUTC(t, ctx, q)

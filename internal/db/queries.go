@@ -762,12 +762,42 @@ func (q *Queries) DeleteBookingPrepareAttempt(ctx context.Context, id int32) err
 	return err
 }
 
-// DeleteRateLimitRecordsBefore prunes login and booking-prepare attempts older than before.
+// ----- Booking create rate limiting -----
+
+// RecordBookingCreateAttempt inserts a booking-create attempt and returns its id.
+func (q *Queries) RecordBookingCreateAttempt(ctx context.Context, ipAddress string) (int32, error) {
+	var id int32
+	err := q.pool.QueryRow(ctx, `
+		INSERT INTO booking_create_attempts (ip_address) VALUES ($1) RETURNING id`,
+		ipAddress,
+	).Scan(&id)
+	return id, err
+}
+
+func (q *Queries) CountRecentBookingCreateAttempts(ctx context.Context, ipAddress string, since time.Time) (int64, error) {
+	var n int64
+	err := q.pool.QueryRow(ctx, `
+		SELECT COUNT(*)::bigint FROM booking_create_attempts
+		WHERE ip_address = $1 AND created_at >= $2`,
+		ipAddress, since,
+	).Scan(&n)
+	return n, err
+}
+
+func (q *Queries) DeleteBookingCreateAttempt(ctx context.Context, id int32) error {
+	_, err := q.pool.Exec(ctx, `DELETE FROM booking_create_attempts WHERE id = $1`, id)
+	return err
+}
+
+// DeleteRateLimitRecordsBefore prunes login and booking rate-limit attempts older than before.
 func (q *Queries) DeleteRateLimitRecordsBefore(ctx context.Context, before time.Time) error {
 	if _, err := q.pool.Exec(ctx, `DELETE FROM login_attempts WHERE created_at < $1`, before); err != nil {
 		return err
 	}
-	_, err := q.pool.Exec(ctx, `DELETE FROM booking_prepare_attempts WHERE created_at < $1`, before)
+	if _, err := q.pool.Exec(ctx, `DELETE FROM booking_prepare_attempts WHERE created_at < $1`, before); err != nil {
+		return err
+	}
+	_, err := q.pool.Exec(ctx, `DELETE FROM booking_create_attempts WHERE created_at < $1`, before)
 	return err
 }
 

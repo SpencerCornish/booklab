@@ -30,6 +30,9 @@ func TestSecurityHeaders(t *testing.T) {
 		if got := h.Get("X-Content-Type-Options"); got != "nosniff" {
 			t.Errorf("%s: X-Content-Type-Options = %q", tc.appURL, got)
 		}
+		if got := h.Get("Permissions-Policy"); got != "camera=(), microphone=(), geolocation=()" {
+			t.Errorf("%s: Permissions-Policy = %q", tc.appURL, got)
+		}
 		if got := h.Get("Strict-Transport-Security") != ""; got != tc.wantHSTS {
 			t.Errorf("%s: HSTS present = %v, want %v", tc.appURL, got, tc.wantHSTS)
 		}
