@@ -214,6 +214,124 @@ func TestValidateBookingCreate_rejectsClosureOverlap(t *testing.T) {
 	}
 }
 
+// Regression tests for closures under a settings timezone behind UTC (the app
+// default is America/Denver): DATE columns store UTC-midnight dates, so an
+// availability query comparing DATE columns against raw timestamptz day bounds
+// missed same-day closures. ListClosuresInRange now compares calendar dates.
+
+func setSettingsZone(t *testing.T, ctx context.Context, q *db.Queries, tz string) {
+	t.Helper()
+	bs := time.Date(0, 1, 1, 9, 0, 0, 0, time.UTC)
+	be := time.Date(0, 1, 1, 21, 0, 0, 0, time.UTC)
+	if _, err := q.UpdateSettings(ctx, db.UpdateSettingsParams{Timezone: &tz, BookableStart: &bs, BookableEnd: &be}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+type availSlot struct {
+	Start     string `json:"start"`
+	End       string `json:"end"`
+	Available bool   `json:"available"`
+}
+
+type availabilityResponse struct {
+	Date          string      `json:"date"`
+	IsClosed      bool        `json:"is_closed"`
+	ClosureReason *string     `json:"closure_reason"`
+	Slots         []availSlot `json:"slots"`
+}
+
+func getAvailability(t *testing.T, baseURL, date string) availabilityResponse {
+	t.Helper()
+	req := mustNewRequest(t, http.MethodGet, baseURL+"/api/availability?date="+date, nil)
+	resp := doReq(t, http.DefaultClient, req)
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("availability %s: status %d body %s", date, resp.StatusCode, body)
+	}
+	var got availabilityResponse
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatalf("decode availability response: %v (%s)", err, body)
+	}
+	return got
+}
+
+func TestAvailability_allDayClosureBehindUTC(t *testing.T) {
+	ctx := context.Background()
+	pool, q := openTestPool(t)
+	truncateBookingData(t, ctx, pool)
+	setSettingsZone(t, ctx, q, "America/Denver")
+
+	day := time.Date(2030, 3, 20, 0, 0, 0, 0, time.UTC)
+	reason := "Painting weekend"
+	if _, err := q.CreateClosure(ctx, day, day, true, nil, nil, &reason); err != nil {
+		t.Fatal(err)
+	}
+
+	emailSvc := emailsvc.New("127.0.0.1", 1025, "", "", "booklab@localhost", testLogger())
+	srv := New(testConfig(), q, &mockStripe{}, emailSvc, nil, testLogger())
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+
+	got := getAvailability(t, ts.URL, "2030-03-20")
+	if !got.IsClosed {
+		t.Fatalf("expected date inside all-day closure to be closed, got %+v", got)
+	}
+	if got.ClosureReason == nil || *got.ClosureReason != reason {
+		t.Fatalf("expected closure_reason %q, got %v", reason, got.ClosureReason)
+	}
+	if len(got.Slots) != 0 {
+		t.Fatalf("expected no slots on a closed day, got %d", len(got.Slots))
+	}
+
+	// The day after the closure must still be open with the full slot grid.
+	open := getAvailability(t, ts.URL, "2030-03-21")
+	if open.IsClosed || len(open.Slots) != 12 {
+		t.Fatalf("expected 2030-03-21 open with 12 slots, got closed=%v slots=%d", open.IsClosed, len(open.Slots))
+	}
+}
+
+func TestAvailability_partialClosureBehindUTC(t *testing.T) {
+	ctx := context.Background()
+	pool, q := openTestPool(t)
+	truncateBookingData(t, ctx, pool)
+	setSettingsZone(t, ctx, q, "America/Denver")
+
+	day := time.Date(2030, 3, 15, 0, 0, 0, 0, time.UTC)
+	startTime := time.Date(0, 1, 1, 12, 0, 0, 0, time.UTC)
+	endTime := time.Date(0, 1, 1, 14, 0, 0, 0, time.UTC)
+	if _, err := q.CreateClosure(ctx, day, day, false, &startTime, &endTime, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	emailSvc := emailsvc.New("127.0.0.1", 1025, "", "", "booklab@localhost", testLogger())
+	srv := New(testConfig(), q, &mockStripe{}, emailSvc, nil, testLogger())
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+
+	got := getAvailability(t, ts.URL, "2030-03-15")
+	if got.IsClosed {
+		t.Fatal("partial closure must not close the whole day")
+	}
+	if len(got.Slots) != 12 {
+		t.Fatalf("expected 12 slots, got %d", len(got.Slots))
+	}
+	blocked := map[string]bool{"2030-03-15T12:00:00-06:00": true, "2030-03-15T13:00:00-06:00": true}
+	for _, slot := range got.Slots {
+		_, isBlocked := blocked[slot.Start]
+		if isBlocked && slot.Available {
+			t.Fatalf("slot %s inside partial closure should be unavailable", slot.Start)
+		}
+		if !isBlocked && !slot.Available {
+			t.Fatalf("slot %s outside partial closure should be available", slot.Start)
+		}
+	}
+}
+
 func TestPrepareBooking_returnsSetupIntent(t *testing.T) {
 	ctx := context.Background()
 	pool, q := openTestPool(t)
