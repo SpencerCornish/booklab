@@ -2,7 +2,12 @@ name: CI
 
 on:
   workflow_dispatch:
+  # Only master: pushes to feature branches run via the pull_request trigger
+  # (which tests the merge ref). Without this, every PR push runs the whole
+  # matrix twice — once per event.
   push:
+    branches:
+      - master
   pull_request:
 
 concurrency:
