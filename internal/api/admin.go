@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -280,6 +281,17 @@ func (s *Server) handleAdminChangePassword(w http.ResponseWriter, r *http.Reques
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// validBookingStatuses mirrors the booking_status enum (001/003 migrations).
+// Query params and JSON bodies carrying status strings are validated against
+// it so bad input is a 400 instead of a Postgres enum-cast error (500).
+var validBookingStatuses = map[db.BookingStatus]bool{
+	db.BookingStatusConfirmed: true,
+	db.BookingStatusCancelled: true,
+	db.BookingStatusCompleted: true,
+	db.BookingStatusCharging:  true,
+	db.BookingStatusCharged:   true,
+}
+
 func (s *Server) handleAdminListBookings(w http.ResponseWriter, r *http.Request) {
 	params := db.ListBookingsParams{}
 
@@ -293,6 +305,10 @@ func (s *Server) handleAdminListBookings(w http.ResponseWriter, r *http.Request)
 	}
 	if st := r.URL.Query().Get("status"); st != "" {
 		status := db.BookingStatus(st)
+		if !validBookingStatuses[status] {
+			s.writeError(w, r, http.StatusBadRequest, "invalid status filter", nil)
+			return
+		}
 		params.Status = &status
 	}
 
@@ -328,6 +344,10 @@ func (s *Server) handleAdminUpdateBooking(w http.ResponseWriter, r *http.Request
 	if req.EndTime != nil {
 		booking, err = s.queries.UpdateBookingEndTime(r.Context(), id, *req.EndTime)
 	} else if req.Status != nil {
+		if !validBookingStatuses[*req.Status] {
+			s.writeError(w, r, http.StatusBadRequest, "invalid status", nil)
+			return
+		}
 		if *req.Status == db.BookingStatusCompleted {
 			existing, gerr := s.queries.GetBookingByID(r.Context(), id)
 			if gerr != nil {
@@ -548,7 +568,8 @@ func (s *Server) handleAdminUpdateSettings(w http.ResponseWriter, r *http.Reques
 		TermsContent           *string   `json:"terms_content"`
 		PrivacyContent         *string   `json:"privacy_content"`
 		// Raw so an absent field (leave unchanged) can be told apart from null (clear the window).
-		NewCustomerRestriction json.RawMessage `json:"new_customer_restriction"`
+		NewCustomerRestriction json.RawMessage   `json:"new_customer_restriction"`
+		NewUserGate            *adminNewUserGate `json:"new_user_gate"`
 	}
 	if !s.readJSONRequest(w, r, &req) {
 		return
@@ -600,6 +621,20 @@ func (s *Server) handleAdminUpdateSettings(w http.ResponseWriter, r *http.Reques
 		params.NewCustomerBlockStart = start
 		params.NewCustomerBlockEnd = end
 		params.NewCustomerBlockMessage = &message
+	}
+	if req.NewUserGate != nil {
+		schedule, badReq := parseNewUserGateSchedule(req.NewUserGate.Schedule)
+		if badReq != "" {
+			s.writeError(w, r, http.StatusBadRequest, badReq, nil)
+			return
+		}
+		question := strings.TrimSpace(req.NewUserGate.Question)
+		if question == "" {
+			question = defaultNewUserGateQuestion
+		}
+		params.NewUserGateEnabled = &req.NewUserGate.Enabled
+		params.NewUserGateQuestion = &question
+		params.NewUserGateSchedule = &schedule
 	}
 
 	settings, err := s.queries.UpdateSettings(r.Context(), params)
@@ -732,7 +767,73 @@ func settingsToMap(s *db.Settings) map[string]any {
 		"terms_content":             s.TermsContent,
 		"privacy_content":           s.PrivacyContent,
 		"new_customer_restriction":  newCustomerRestrictionToMap(s),
+		"new_user_gate":             newUserGateToMap(s),
 	}
+}
+
+// newUserGateToMap returns the gate settings, always including the schedule as
+// an array (never null) so admin clients can round-trip it.
+func newUserGateToMap(s *db.Settings) map[string]any {
+	schedule := s.NewUserGateSchedule
+	if schedule == nil {
+		schedule = []db.NewUserWindow{}
+	}
+	return map[string]any{
+		"enabled":  s.NewUserGateEnabled,
+		"question": s.NewUserGateQuestion,
+		"schedule": schedule,
+	}
+}
+
+// adminNewUserGate is the settings payload for the pre-schedule question gate.
+type adminNewUserGate struct {
+	Enabled  bool               `json:"enabled"`
+	Question string             `json:"question"`
+	Schedule []db.NewUserWindow `json:"schedule"`
+}
+
+// parseNewUserGateSchedule validates the weekly trainer schedule: weekdays
+// 0-6, parseable HH:MM times with start before end, and no overlapping windows
+// on the same weekday. Windows are returned sorted by weekday, then start.
+func parseNewUserGateSchedule(in []db.NewUserWindow) ([]db.NewUserWindow, string) {
+	type clockRange struct{ start, end time.Time }
+	perDay := map[int][]clockRange{}
+
+	out := make([]db.NewUserWindow, 0, len(in))
+	for _, w := range in {
+		if w.Weekday < 0 || w.Weekday > 6 {
+			return nil, "new_user_gate schedule weekday must be 0 (Sunday) through 6 (Saturday)"
+		}
+		start, okStart := parseClock(w.Start)
+		end, okEnd := parseClock(w.End)
+		if !okStart || !okEnd {
+			return nil, "new_user_gate schedule times must use HH:MM"
+		}
+		if !end.After(start) {
+			return nil, "new_user_gate schedule end time must be after start time"
+		}
+		perDay[w.Weekday] = append(perDay[w.Weekday], clockRange{start, end})
+		out = append(out, db.NewUserWindow{
+			Weekday: w.Weekday,
+			Start:   start.Format("15:04"),
+			End:     end.Format("15:04"),
+		})
+	}
+	for _, ranges := range perDay {
+		sort.Slice(ranges, func(i, j int) bool { return ranges[i].start.Before(ranges[j].start) })
+		for i := 1; i < len(ranges); i++ {
+			if ranges[i].start.Before(ranges[i-1].end) {
+				return nil, "new_user_gate schedule windows overlap on the same weekday"
+			}
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Weekday != out[j].Weekday {
+			return out[i].Weekday < out[j].Weekday
+		}
+		return out[i].Start < out[j].Start
+	})
+	return out, ""
 }
 
 // newCustomerRestrictionToMap returns the configured window as an object, or nil when unset.

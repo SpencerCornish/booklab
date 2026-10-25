@@ -16,6 +16,10 @@ type Config struct {
 
 	StripeSecretKey string `envconfig:"STRIPE_SECRET_KEY" required:"true"`
 
+	// StripeFake swaps the real Stripe client for a hermetic fake (functional
+	// tests). No Stripe network calls are made when enabled.
+	StripeFake bool `envconfig:"STRIPE_FAKE" default:"false"`
+
 	SMTPHost string `envconfig:"SMTP_HOST" required:"true"`
 	SMTPPort int    `envconfig:"SMTP_PORT" default:"587"`
 	SMTPUser string `envconfig:"SMTP_USER" required:"true"`

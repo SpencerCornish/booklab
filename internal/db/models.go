@@ -40,6 +40,7 @@ type Booking struct {
 	ChargeIdempotencyKey  *string           `json:"charge_idempotency_key"`
 	CreatedAt             time.Time         `json:"created_at"`
 	UpdatedAt             time.Time         `json:"updated_at"`
+	IsNewUser             *bool             `json:"is_new_user"`
 }
 
 type Closure struct {
@@ -53,26 +54,36 @@ type Closure struct {
 	CreatedAt time.Time  `json:"created_at"`
 }
 
+type NewUserWindow struct {
+	// Weekday uses Go/JS numbering: 0 = Sunday … 6 = Saturday.
+	Weekday int    `json:"weekday"`
+	Start   string `json:"start"` // HH:MM
+	End     string `json:"end"`   // HH:MM
+}
+
 type Settings struct {
-	ID                      int32      `json:"id"`
-	ResourceName            string     `json:"resource_name"`
-	HourlyRateCents         int32      `json:"hourly_rate_cents"`
-	Currency                string     `json:"currency"`
-	Timezone                string     `json:"timezone"`
-	BookableStart           time.Time  `json:"bookable_start"`
-	BookableEnd             time.Time  `json:"bookable_end"`
-	MinHours                int32      `json:"min_hours"`
-	MaxHours                int32      `json:"max_hours"`
-	ReminderHoursBefore     int32      `json:"reminder_hours_before"`
-	NotificationEmails      string     `json:"notification_emails"`
-	AutoChargeDelayMinutes  int32      `json:"auto_charge_delay_minutes"`
-	ReferralSources         []string   `json:"referral_sources"`
-	TermsContent            string     `json:"terms_content"`
-	PrivacyContent          string     `json:"privacy_content"`
-	NewCustomerBlockStart   *time.Time `json:"new_customer_block_start"`
-	NewCustomerBlockEnd     *time.Time `json:"new_customer_block_end"`
-	NewCustomerBlockMessage string     `json:"new_customer_block_message"`
-	MinLeadHours            int32      `json:"min_lead_hours"`
+	ID                      int32           `json:"id"`
+	ResourceName            string          `json:"resource_name"`
+	HourlyRateCents         int32           `json:"hourly_rate_cents"`
+	Currency                string          `json:"currency"`
+	Timezone                string          `json:"timezone"`
+	BookableStart           time.Time       `json:"bookable_start"`
+	BookableEnd             time.Time       `json:"bookable_end"`
+	MinHours                int32           `json:"min_hours"`
+	MaxHours                int32           `json:"max_hours"`
+	ReminderHoursBefore     int32           `json:"reminder_hours_before"`
+	NotificationEmails      string          `json:"notification_emails"`
+	AutoChargeDelayMinutes  int32           `json:"auto_charge_delay_minutes"`
+	ReferralSources         []string        `json:"referral_sources"`
+	TermsContent            string          `json:"terms_content"`
+	PrivacyContent          string          `json:"privacy_content"`
+	NewCustomerBlockStart   *time.Time      `json:"new_customer_block_start"`
+	NewCustomerBlockEnd     *time.Time      `json:"new_customer_block_end"`
+	NewCustomerBlockMessage string          `json:"new_customer_block_message"`
+	MinLeadHours            int32           `json:"min_lead_hours"`
+	NewUserGateEnabled      bool            `json:"new_user_gate_enabled"`
+	NewUserGateQuestion     string          `json:"new_user_gate_question"`
+	NewUserGateSchedule     []NewUserWindow `json:"new_user_gate_schedule"`
 }
 
 type AdminUser struct {

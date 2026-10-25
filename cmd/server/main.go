@@ -36,7 +36,11 @@ func main() {
 	defer pool.Close()
 
 	queries := db.New(pool)
-	stripeService := stripesvc.New(cfg.StripeSecretKey, logger)
+	var stripeService stripesvc.Client = stripesvc.New(cfg.StripeSecretKey, logger)
+	if cfg.StripeFake {
+		logger.Info("stripe fake mode enabled (functional tests)")
+		stripeService = stripesvc.NewFake()
+	}
 	emailService := emailsvc.New(cfg.SMTPHost, cfg.SMTPPort, cfg.SMTPUser, cfg.SMTPPass, cfg.SMTPFrom, logger)
 
 	if user := os.Getenv("ADMIN_USER"); user != "" {

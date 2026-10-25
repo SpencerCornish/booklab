@@ -2,7 +2,12 @@ name: CI
 
 on:
   workflow_dispatch:
+  # Only master: pushes to feature branches run via the pull_request trigger
+  # (which tests the merge ref). Without this, every PR push runs the whole
+  # matrix twice — once per event.
   push:
+    branches:
+      - master
   pull_request:
 
 concurrency:
@@ -73,3 +78,109 @@ jobs:
           pnpm install --frozen-lockfile
           pnpm exec tsc --noEmit
           pnpm run build
+
+  functional-api:
+    name: Functional API (Hurl)
+    # Pinned: hurl's release build links libxml2.so.2 dynamically, and the
+    # package name differs on newer runner images (ubuntu-latest → 26.x).
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.3"
+          cache-dependency-path: go.sum
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.1.2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24.15.0"
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+
+      - name: Install hurl
+        uses: ./.github/actions/setup-hurl
+
+      - name: Build app (web + api)
+        run: make build
+
+      - name: Run Hurl functional suites
+        run: make test-func-api
+
+      - name: Upload JUnit reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hurl-junit
+          path: .functest/junit-*.xml
+          if-no-files-found: ignore
+
+  e2e:
+    name: E2E (Playwright)
+    runs-on: ubuntu-latest
+    env:
+      # Optional, TEST MODE only: enables the real-payment spec (payment.spec.ts).
+      # The spec itself skips without these and refuses any non-test-mode key.
+      STRIPE_TEST_SECRET_KEY: ${{ secrets.STRIPE_TEST_SECRET_KEY }}
+      STRIPE_TEST_PUBLISHABLE_KEY: ${{ secrets.STRIPE_TEST_PUBLISHABLE_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.3"
+          cache-dependency-path: go.sum
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.1.2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24.15.0"
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('tests/e2e/pnpm-lock.yaml') }}
+
+      - name: Build app (web + api)
+        run: make build
+
+      - name: Run Playwright E2E suites
+        run: make test-e2e
+
+      - name: Upload traces and reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-artifacts
+          path: |
+            .functest/e2e-artifacts/
+            tests/e2e/playwright-report/
+          if-no-files-found: ignore
+
+  docker-smoke:
+    name: Docker smoke (prod compose)
+    # Same reasoning as functional-api (hurl install).
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.3"
+          cache-dependency-path: go.sum
+
+      - name: Install hurl
+        uses: ./.github/actions/setup-hurl
+
+      - name: Build & probe the production compose stack
+        run: make test-smoke

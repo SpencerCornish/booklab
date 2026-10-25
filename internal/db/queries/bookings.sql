@@ -1,6 +1,6 @@
 -- name: CreateBooking :one
-INSERT INTO bookings (name, email, start_time, end_time, stripe_setup_intent_id)
-VALUES ($1, $2, $3, $4, $5)
+INSERT INTO bookings (name, email, metadata, start_time, end_time, stripe_setup_intent_id, stripe_payment_method_id, is_new_user)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 RETURNING *;
 
 -- name: GetBookingByID :one

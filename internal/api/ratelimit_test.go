@@ -20,6 +20,7 @@ import (
 
 	"github.com/spencercornish/booklab/internal/db"
 	emailsvc "github.com/spencercornish/booklab/internal/email"
+	"github.com/spencercornish/booklab/internal/stripe/stripetest"
 )
 
 // A burst of concurrent wrong-password logins must not get more than loginRateLimitMax
@@ -39,7 +40,7 @@ func TestAdminLogin_concurrentBurstIsRateLimited(t *testing.T) {
 	}
 
 	emailSvc := emailsvc.New("127.0.0.1", 1025, "", "", "booklab@localhost", testLogger())
-	srv := New(testConfig(), q, &mockStripe{}, emailSvc, nil, testLogger())
+	srv := New(testConfig(), q, stripetest.New(), emailSvc, nil, testLogger())
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 
@@ -101,7 +102,7 @@ func TestPrepareBooking_rateLimitedPerIP(t *testing.T) {
 	clearNewCustomerRestriction(t, ctx, q)
 
 	emailSvc := emailsvc.New("127.0.0.1", 1025, "", "", "booklab@localhost", testLogger())
-	srv := New(testConfig(), q, &mockStripe{}, emailSvc, nil, testLogger())
+	srv := New(testConfig(), q, stripetest.New(), emailSvc, nil, testLogger())
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 
@@ -169,13 +170,13 @@ func TestAdminChargeBooking_idempotencyKeyAcrossRetries(t *testing.T) {
 		{"card declined", &stripego.Error{Type: stripego.ErrorTypeCard, HTTPStatusCode: http.StatusPaymentRequired}, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			ms := &mockStripe{chargeErrs: []error{tc.firstErr, nil}}
+			ms := stripetest.NewScripted(tc.firstErr, nil)
 			srv := New(testConfig(), q, ms, emailSvc, nil, testLogger())
 			ts := httptest.NewServer(srv.Handler())
 			t.Cleanup(ts.Close)
 
 			start := time.Date(2031, 3, 1+i, 12, 0, 0, 0, time.UTC)
-			b, err := q.CreateBooking(ctx, "Pat", "pat@example.com", nil, start, start.Add(2*time.Hour), "si_"+tc.name, "pm_test_123")
+			b, err := q.CreateBooking(ctx, "Pat", "pat@example.com", nil, start, start.Add(2*time.Hour), "si_"+tc.name, "pm_test_123", nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -202,11 +203,12 @@ func TestAdminChargeBooking_idempotencyKeyAcrossRetries(t *testing.T) {
 			if got := charge(); got != http.StatusOK {
 				t.Fatalf("retry: status %d want 200", got)
 			}
-			if len(ms.chargeKeys) != 2 {
-				t.Fatalf("charge calls = %d want 2", len(ms.chargeKeys))
+			keys := ms.Keys()
+			if len(keys) != 2 {
+				t.Fatalf("charge calls = %d want 2", len(keys))
 			}
-			if same := ms.chargeKeys[0] == ms.chargeKeys[1]; same != tc.sameKey {
-				t.Fatalf("keys %q then %q: same = %v, want %v", ms.chargeKeys[0], ms.chargeKeys[1], same, tc.sameKey)
+			if same := keys[0] == keys[1]; same != tc.sameKey {
+				t.Fatalf("keys %q then %q: same = %v, want %v", keys[0], keys[1], same, tc.sameKey)
 			}
 		})
 	}

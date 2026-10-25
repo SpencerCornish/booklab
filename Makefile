@@ -6,6 +6,8 @@
 .PHONY: help dev dev-api dev-web db db-stop db-reset \
         build build-web build-api \
         docker-build docker-up docker-down docker-logs \
+        stack-up stack-down stack-nuke reset-db \
+        test-func-api test-e2e test-smoke \
         migrate seed-admin \
         lint fmt test tidy \
         clean
@@ -23,6 +25,12 @@ WEB_DIR := web
 # Load DATABASE_URL from .env if present (for migrate/seed targets)
 -include .env
 export
+
+# ── Functional tests ─────────────────────────────────────────────────────────
+FUNCTEST_COMPOSE_FILE := tests/compose/docker-compose.test.yml
+FUNCTEST_PROJECT      := booklab-functest
+FUNCTEST_COMPOSE      := docker compose -f $(FUNCTEST_COMPOSE_FILE) -p $(FUNCTEST_PROJECT)
+HURL                  ?= hurl
 
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -129,6 +137,31 @@ lint: ## Lint Go (golangci-lint) and frontend (tsc type-check)
 test: ## Run Go tests
 	@echo "$(CYAN)Running tests...$(RESET)"
 	@$(GO) test ./... -v
+
+##@ Functional tests
+
+stack-up: ## Start the functional-test stack (Postgres :5433 + Mailpit :8027)
+	@echo "$(CYAN)Starting functional-test stack...$(RESET)"
+	@$(FUNCTEST_COMPOSE) up -d --wait
+	@echo "$(CYAN)Mailpit UI → http://localhost:8027$(RESET)"
+
+stack-down: ## Stop the functional-test stack (keeps volumes for fast re-runs)
+	@$(FUNCTEST_COMPOSE) down
+
+stack-nuke: ## Stop the functional-test stack AND delete its volumes
+	@$(FUNCTEST_COMPOSE) down -v
+
+reset-db: ## Reset the functional-test database (between-suite state)
+	@./tests/scripts/reset-db.sh
+
+test-func-api: ## Run Hurl API functional suites (builds app, full stack, auto teardown)
+	@./tests/scripts/run-tests.sh hurl
+
+test-e2e: ## Run Playwright E2E suites (builds app, full stack, auto teardown)
+	@./tests/scripts/run-tests.sh e2e
+
+test-smoke: ## Run the production Docker compose smoke test
+	@./tests/smoke/run.sh
 
 ##@ Misc
 

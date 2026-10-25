@@ -14,6 +14,7 @@ import (
 	emailsvc "github.com/spencercornish/booklab/internal/email"
 
 	"github.com/spencercornish/booklab/internal/db"
+	"github.com/spencercornish/booklab/internal/stripe/stripetest"
 )
 
 func TestCreateBooking_requestBodyExceedsLimit(t *testing.T) {
@@ -22,7 +23,7 @@ func TestCreateBooking_requestBodyExceedsLimit(t *testing.T) {
 	truncateBookingData(t, ctx, pool)
 	resetSettingsUTC(t, ctx, q)
 
-	ms := &mockStripe{}
+	ms := stripetest.New()
 	emailSvc := emailsvc.New("127.0.0.1", 1025, "", "", "booklab@localhost", testLogger())
 	srv := New(testConfig(), q, ms, emailSvc, nil, testLogger())
 	ts := httptest.NewServer(srv.Handler())
@@ -53,7 +54,7 @@ func TestValidateBookingCreate_rejectsPastStart(t *testing.T) {
 	}
 	start := time.Now().Add(-3 * time.Hour)
 	end := start.Add(2 * time.Hour)
-	bad, err := s.validateBookingCreate(ctx, start, end, settings)
+	bad, err := s.validateBookingCreate(ctx, start, end, settings, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,7 +67,7 @@ func TestValidateBookingCreate_rejectsInsideMinLeadTime(t *testing.T) {
 	s := &Server{cfg: testConfig(), logger: testLogger()}
 	settings := &db.Settings{Timezone: "UTC", MinHours: 1, MaxHours: 8, MinLeadHours: 24}
 	start := time.Now().Add(23 * time.Hour)
-	bad, err := s.validateBookingCreate(context.Background(), start, start.Add(2*time.Hour), settings)
+	bad, err := s.validateBookingCreate(context.Background(), start, start.Add(2*time.Hour), settings, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,7 +97,7 @@ func TestValidateBookingCreate_allowsBeyondMinLeadTime(t *testing.T) {
 
 	s := &Server{queries: q, cfg: testConfig(), logger: testLogger()}
 	start := time.Date(2035, 7, 11, 11, 0, 0, 0, time.UTC)
-	bad, err := s.validateBookingCreate(ctx, start, start.Add(2*time.Hour), settings)
+	bad, err := s.validateBookingCreate(ctx, start, start.Add(2*time.Hour), settings, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -119,7 +120,7 @@ func TestValidateBookingCreate_rejectsOutsideBookableHours(t *testing.T) {
 	// Window 10:00–16:00 UTC; 08:00–10:00 is two hours (meets min) but starts before window.
 	start := time.Date(2035, 7, 10, 8, 0, 0, 0, time.UTC)
 	end := time.Date(2035, 7, 10, 10, 0, 0, 0, time.UTC)
-	bad, err := s.validateBookingCreate(ctx, start, end, settings)
+	bad, err := s.validateBookingCreate(ctx, start, end, settings, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -141,7 +142,7 @@ func TestValidateBookingCreate_rejectsUnderMinDuration(t *testing.T) {
 	}
 	start := time.Date(2035, 7, 11, 11, 0, 0, 0, time.UTC)
 	end := start.Add(time.Hour) // 1 hour < min_hours 2
-	bad, err := s.validateBookingCreate(ctx, start, end, settings)
+	bad, err := s.validateBookingCreate(ctx, start, end, settings, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -177,7 +178,7 @@ func TestValidateBookingCreate_rejectsOverMaxDuration(t *testing.T) {
 	s := &Server{queries: q, cfg: testConfig(), logger: testLogger()}
 	start := time.Date(2035, 7, 12, 11, 0, 0, 0, time.UTC)
 	end := start.Add(4 * time.Hour)
-	bad, err := s.validateBookingCreate(ctx, start, end, settings)
+	bad, err := s.validateBookingCreate(ctx, start, end, settings, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -205,12 +206,130 @@ func TestValidateBookingCreate_rejectsClosureOverlap(t *testing.T) {
 	}
 	start := time.Date(2035, 8, 15, 11, 0, 0, 0, time.UTC)
 	end := start.Add(2 * time.Hour)
-	bad, err := s.validateBookingCreate(ctx, start, end, settings)
+	bad, err := s.validateBookingCreate(ctx, start, end, settings, false)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if bad == "" {
 		t.Fatal("expected rejection when booking overlaps a closure")
+	}
+}
+
+// Regression tests for closures under a settings timezone behind UTC (the app
+// default is America/Denver): DATE columns store UTC-midnight dates, so an
+// availability query comparing DATE columns against raw timestamptz day bounds
+// missed same-day closures. ListClosuresInRange now compares calendar dates.
+
+func setSettingsZone(t *testing.T, ctx context.Context, q *db.Queries, tz string) {
+	t.Helper()
+	bs := time.Date(0, 1, 1, 9, 0, 0, 0, time.UTC)
+	be := time.Date(0, 1, 1, 21, 0, 0, 0, time.UTC)
+	if _, err := q.UpdateSettings(ctx, db.UpdateSettingsParams{Timezone: &tz, BookableStart: &bs, BookableEnd: &be}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+type availSlot struct {
+	Start     string `json:"start"`
+	End       string `json:"end"`
+	Available bool   `json:"available"`
+}
+
+type availabilityResponse struct {
+	Date          string      `json:"date"`
+	IsClosed      bool        `json:"is_closed"`
+	ClosureReason *string     `json:"closure_reason"`
+	Slots         []availSlot `json:"slots"`
+}
+
+func getAvailability(t *testing.T, baseURL, date string) availabilityResponse {
+	t.Helper()
+	req := mustNewRequest(t, http.MethodGet, baseURL+"/api/availability?date="+date, nil)
+	resp := doReq(t, http.DefaultClient, req)
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("availability %s: status %d body %s", date, resp.StatusCode, body)
+	}
+	var got availabilityResponse
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatalf("decode availability response: %v (%s)", err, body)
+	}
+	return got
+}
+
+func TestAvailability_allDayClosureBehindUTC(t *testing.T) {
+	ctx := context.Background()
+	pool, q := openTestPool(t)
+	truncateBookingData(t, ctx, pool)
+	setSettingsZone(t, ctx, q, "America/Denver")
+
+	day := time.Date(2030, 3, 20, 0, 0, 0, 0, time.UTC)
+	reason := "Painting weekend"
+	if _, err := q.CreateClosure(ctx, day, day, true, nil, nil, &reason); err != nil {
+		t.Fatal(err)
+	}
+
+	emailSvc := emailsvc.New("127.0.0.1", 1025, "", "", "booklab@localhost", testLogger())
+	srv := New(testConfig(), q, stripetest.New(), emailSvc, nil, testLogger())
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+
+	got := getAvailability(t, ts.URL, "2030-03-20")
+	if !got.IsClosed {
+		t.Fatalf("expected date inside all-day closure to be closed, got %+v", got)
+	}
+	if got.ClosureReason == nil || *got.ClosureReason != reason {
+		t.Fatalf("expected closure_reason %q, got %v", reason, got.ClosureReason)
+	}
+	if len(got.Slots) != 0 {
+		t.Fatalf("expected no slots on a closed day, got %d", len(got.Slots))
+	}
+
+	// The day after the closure must still be open with the full slot grid.
+	open := getAvailability(t, ts.URL, "2030-03-21")
+	if open.IsClosed || len(open.Slots) != 12 {
+		t.Fatalf("expected 2030-03-21 open with 12 slots, got closed=%v slots=%d", open.IsClosed, len(open.Slots))
+	}
+}
+
+func TestAvailability_partialClosureBehindUTC(t *testing.T) {
+	ctx := context.Background()
+	pool, q := openTestPool(t)
+	truncateBookingData(t, ctx, pool)
+	setSettingsZone(t, ctx, q, "America/Denver")
+
+	day := time.Date(2030, 3, 15, 0, 0, 0, 0, time.UTC)
+	startTime := time.Date(0, 1, 1, 12, 0, 0, 0, time.UTC)
+	endTime := time.Date(0, 1, 1, 14, 0, 0, 0, time.UTC)
+	if _, err := q.CreateClosure(ctx, day, day, false, &startTime, &endTime, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	emailSvc := emailsvc.New("127.0.0.1", 1025, "", "", "booklab@localhost", testLogger())
+	srv := New(testConfig(), q, stripetest.New(), emailSvc, nil, testLogger())
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+
+	got := getAvailability(t, ts.URL, "2030-03-15")
+	if got.IsClosed {
+		t.Fatal("partial closure must not close the whole day")
+	}
+	if len(got.Slots) != 12 {
+		t.Fatalf("expected 12 slots, got %d", len(got.Slots))
+	}
+	blocked := map[string]bool{"2030-03-15T12:00:00-06:00": true, "2030-03-15T13:00:00-06:00": true}
+	for _, slot := range got.Slots {
+		_, isBlocked := blocked[slot.Start]
+		if isBlocked && slot.Available {
+			t.Fatalf("slot %s inside partial closure should be unavailable", slot.Start)
+		}
+		if !isBlocked && !slot.Available {
+			t.Fatalf("slot %s outside partial closure should be available", slot.Start)
+		}
 	}
 }
 
@@ -220,7 +339,7 @@ func TestPrepareBooking_returnsSetupIntent(t *testing.T) {
 	truncateBookingData(t, ctx, pool)
 	resetSettingsUTC(t, ctx, q)
 
-	ms := &mockStripe{}
+	ms := stripetest.New()
 	emailSvc := emailsvc.New("127.0.0.1", 1025, "", "", "booklab@localhost", testLogger())
 	srv := New(testConfig(), q, ms, emailSvc, nil, testLogger())
 	ts := httptest.NewServer(srv.Handler())
@@ -263,7 +382,7 @@ func TestCreateBooking_finalizeInsertsWithPaymentMethod(t *testing.T) {
 	truncateBookingData(t, ctx, pool)
 	resetSettingsUTC(t, ctx, q)
 
-	ms := &mockStripe{}
+	ms := stripetest.New()
 	emailSvc := emailsvc.New("127.0.0.1", 1025, "", "", "booklab@localhost", testLogger())
 	srv := New(testConfig(), q, ms, emailSvc, nil, testLogger())
 	ts := httptest.NewServer(srv.Handler())
@@ -271,8 +390,9 @@ func TestCreateBooking_finalizeInsertsWithPaymentMethod(t *testing.T) {
 
 	start := time.Date(2035, 6, 11, 12, 0, 0, 0, time.UTC)
 	end := start.Add(2 * time.Hour)
-	payload := fmt.Sprintf(`{"setup_intent_id":"si_test_mock","name":"Pat","email":"pat@example.com","start_time":%q,"end_time":%q}`,
-		start.Format(time.RFC3339), end.Format(time.RFC3339))
+	siID := mintSetupIntentID(t)
+	payload := fmt.Sprintf(`{"setup_intent_id":%q,"name":"Pat","email":"pat@example.com","start_time":%q,"end_time":%q}`,
+		siID, start.Format(time.RFC3339), end.Format(time.RFC3339))
 
 	req := mustNewRequest(t, http.MethodPost, ts.URL+"/api/bookings", strings.NewReader(payload))
 	resp := doReq(t, ts.Client(), req)
@@ -289,8 +409,8 @@ func TestCreateBooking_finalizeInsertsWithPaymentMethod(t *testing.T) {
 	if len(b) != 1 {
 		t.Fatalf("bookings count = %d, want 1", len(b))
 	}
-	if b[0].StripePaymentMethodID == nil || *b[0].StripePaymentMethodID != "pm_test_mock" {
-		t.Fatalf("payment method = %v, want pm_test_mock", b[0].StripePaymentMethodID)
+	if b[0].StripePaymentMethodID == nil || *b[0].StripePaymentMethodID != "pm_fake_"+siID {
+		t.Fatalf("payment method = %v, want pm_fake_%s", b[0].StripePaymentMethodID, siID)
 	}
 }
 
@@ -300,7 +420,7 @@ func TestCreateBooking_idempotentBySetupIntent(t *testing.T) {
 	truncateBookingData(t, ctx, pool)
 	resetSettingsUTC(t, ctx, q)
 
-	ms := &mockStripe{}
+	ms := stripetest.New()
 	emailSvc := emailsvc.New("127.0.0.1", 1025, "", "", "booklab@localhost", testLogger())
 	srv := New(testConfig(), q, ms, emailSvc, nil, testLogger())
 	ts := httptest.NewServer(srv.Handler())
@@ -308,8 +428,8 @@ func TestCreateBooking_idempotentBySetupIntent(t *testing.T) {
 
 	start := time.Date(2035, 6, 12, 12, 0, 0, 0, time.UTC)
 	end := start.Add(2 * time.Hour)
-	payload := fmt.Sprintf(`{"setup_intent_id":"si_test_mock","name":"Pat","email":"pat@example.com","start_time":%q,"end_time":%q}`,
-		start.Format(time.RFC3339), end.Format(time.RFC3339))
+	payload := fmt.Sprintf(`{"setup_intent_id":%q,"name":"Pat","email":"pat@example.com","start_time":%q,"end_time":%q}`,
+		mintSetupIntentID(t), start.Format(time.RFC3339), end.Format(time.RFC3339))
 
 	for i := 0; i < 2; i++ {
 		req := mustNewRequest(t, http.MethodPost, ts.URL+"/api/bookings", strings.NewReader(payload))
@@ -335,7 +455,7 @@ func TestCreateBooking_idempotentBySetupIntent(t *testing.T) {
 func newCustomerTestServer(t *testing.T, q *db.Queries) *httptest.Server {
 	t.Helper()
 	emailSvc := emailsvc.New("127.0.0.1", 1025, "", "", "booklab@localhost", testLogger())
-	srv := New(testConfig(), q, &mockStripe{}, emailSvc, nil, testLogger())
+	srv := New(testConfig(), q, stripetest.New(), emailSvc, nil, testLogger())
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 	return ts
@@ -373,9 +493,26 @@ func prepareBookingPayload(email string, start, end time.Time) string {
 	return fmt.Sprintf(`{"email":%q,"start_time":%q,"end_time":%q}`, email, start.Format(time.RFC3339), end.Format(time.RFC3339))
 }
 
-func createBookingPayload(start, end time.Time) string {
-	return fmt.Sprintf(`{"setup_intent_id":"si_test_mock","name":"Pat","email":"pat@example.com","start_time":%q,"end_time":%q}`,
-		start.Format(time.RFC3339), end.Format(time.RFC3339))
+// mintFake issues globally-unique setup-intent IDs for test payloads (a fresh
+// fake per call would restart its counter and hand back colliding IDs, which
+// the idempotency path would silently collapse).
+var mintFake = stripetest.New()
+
+// mintSetupIntentID returns a setup-intent ID issued by the shared fake, so
+// payloads exercise the same acceptance path as production flows.
+func mintSetupIntentID(t *testing.T) string {
+	t.Helper()
+	id, _, err := mintFake.CreateSetupIntent("pat@example.com")
+	if err != nil {
+		t.Fatalf("mint setup intent: %v", err)
+	}
+	return id
+}
+
+func createBookingPayload(t *testing.T, start, end time.Time) string {
+	t.Helper()
+	return fmt.Sprintf(`{"setup_intent_id":%q,"name":"Pat","email":"pat@example.com","start_time":%q,"end_time":%q}`,
+		mintSetupIntentID(t), start.Format(time.RFC3339), end.Format(time.RFC3339))
 }
 
 func TestNewCustomerRestriction_blocksNewCustomerInsideWindow(t *testing.T) {
@@ -394,7 +531,7 @@ func TestNewCustomerRestriction_blocksNewCustomerInsideWindow(t *testing.T) {
 		t.Fatalf("prepare: status %d body %v, want 403 with restriction message", status, body)
 	}
 
-	status, body = postJSONForTest(t, ts, "/api/bookings", createBookingPayload(start, end))
+	status, body = postJSONForTest(t, ts, "/api/bookings", createBookingPayload(t, start, end))
 	if status != http.StatusForbidden || body["error"] != "Closed for vacation" {
 		t.Fatalf("create: status %d body %v, want 403 with restriction message", status, body)
 	}
@@ -434,7 +571,7 @@ func TestNewCustomerRestriction_confirmedFutureBookingDoesNotCount(t *testing.T)
 
 	// A confirmed booking on a far-off date must not unlock the window.
 	far := time.Date(2035, 8, 1, 12, 0, 0, 0, time.UTC)
-	if _, err := q.CreateBooking(ctx, "Pat", "pat@example.com", nil, far, far.Add(2*time.Hour), "si_future", "pm_test_123"); err != nil {
+	if _, err := q.CreateBooking(ctx, "Pat", "pat@example.com", nil, far, far.Add(2*time.Hour), "si_future", "pm_test_123", nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -455,7 +592,7 @@ func TestNewCustomerRestriction_returningCustomerAllowed(t *testing.T) {
 
 	// Email match ignores case and surrounding whitespace; a completed booking in the past unlocks the window.
 	past := time.Date(2031, 3, 1, 12, 0, 0, 0, time.UTC)
-	b, err := q.CreateBooking(ctx, "Pat", " Pat@Example.com ", nil, past, past.Add(2*time.Hour), "si_past", "pm_test_123")
+	b, err := q.CreateBooking(ctx, "Pat", " Pat@Example.com ", nil, past, past.Add(2*time.Hour), "si_past", "pm_test_123", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -469,7 +606,7 @@ func TestNewCustomerRestriction_returningCustomerAllowed(t *testing.T) {
 	if status != http.StatusOK {
 		t.Fatalf("prepare: status %d body %v, want 200 for returning customer", status, body)
 	}
-	status, body = postJSONForTest(t, ts, "/api/bookings", createBookingPayload(start, end))
+	status, body = postJSONForTest(t, ts, "/api/bookings", createBookingPayload(t, start, end))
 	if status != http.StatusCreated {
 		t.Fatalf("create: status %d body %v, want 201 for returning customer", status, body)
 	}
@@ -487,7 +624,7 @@ func TestNewCustomerRestriction_historyStatusesCountAsReturning(t *testing.T) {
 	for i, st := range []db.BookingStatus{"charging", "charged"} {
 		past := time.Date(2031, 3, 1+i, 12, 0, 0, 0, time.UTC)
 		email := fmt.Sprintf("returning%d@example.com", i)
-		b, err := q.CreateBooking(ctx, "Pat", email, nil, past, past.Add(2*time.Hour), fmt.Sprintf("si_hist_%d", i), "pm_test_123")
+		b, err := q.CreateBooking(ctx, "Pat", email, nil, past, past.Add(2*time.Hour), fmt.Sprintf("si_hist_%d", i), "pm_test_123", nil)
 		if err != nil {
 			t.Fatal(err)
 		}

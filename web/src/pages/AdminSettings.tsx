@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
+import { Navigate, NavLink, useParams } from 'react-router'
 import { adminGetSettings, adminUpdateSettings, ApiError } from '../lib/api'
-import type { NewCustomerRestriction, Settings } from '../lib/types'
+import type { NewCustomerRestriction, NewUserGateAdmin, NewUserWindow, Settings } from '../lib/types'
 import { RichTextEditor } from '../components/RichTextEditor'
 
 export default function AdminSettings() {
@@ -20,6 +21,31 @@ export default function AdminSettings() {
       .catch(console.error)
       .finally(() => setLoading(false))
   }, [])
+
+  const sectionParam = useParams().section
+  const page: SectionKey = sectionParam && isSectionKey(sectionParam) ? sectionParam : 'general'
+
+  // Unsaved fields are those whose form value differs from the last saved settings.
+  const dirtyFields = new Set<keyof Settings>(
+    settings
+      ? (Object.keys(form) as (keyof Settings)[]).filter(
+          (key) => JSON.stringify(form[key]) !== JSON.stringify(settings[key]),
+        )
+      : [],
+  )
+  const dirty = dirtyFields.size > 0
+
+  // Warn before a full page unload (tab close/reload) with pending edits.
+  useEffect(() => {
+    if (!dirty) return
+    const onBeforeUnload = (e: BeforeUnloadEvent) => e.preventDefault()
+    window.addEventListener('beforeunload', onBeforeUnload)
+    return () => window.removeEventListener('beforeunload', onBeforeUnload)
+  }, [dirty])
+
+  if (sectionParam && !isSectionKey(sectionParam)) {
+    return <Navigate to="/admin/settings/general" replace />
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -70,6 +96,22 @@ export default function AdminSettings() {
       new_customer_restriction: { start_date: '', end_date: '', message: '', ...prev.new_customer_restriction, ...patch },
     }))
 
+  const gate: NewUserGateAdmin = form.new_user_gate ?? {
+    enabled: false,
+    question: DEFAULT_NEW_USER_QUESTION,
+    schedule: [],
+  }
+
+  const updateGate = (patch: Partial<NewUserGateAdmin>) =>
+    setForm((prev) => {
+      const current: NewUserGateAdmin = prev.new_user_gate ?? {
+        enabled: false,
+        question: DEFAULT_NEW_USER_QUESTION,
+        schedule: [],
+      }
+      return { ...prev, new_user_gate: { ...current, ...patch } }
+    })
+
   if (loading || !settings) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -79,11 +121,45 @@ export default function AdminSettings() {
   }
 
   return (
-    <div className="p-4 sm:p-8 max-w-2xl">
-      <h1 className="text-2xl font-bold text-gray-900 mb-6">Settings</h1>
-      <form onSubmit={handleSubmit} className="space-y-6">
-        <section>
-          <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">Resource</h2>
+    <div className="p-4 sm:p-8">
+      <div className="max-w-3xl">
+        <div className="flex flex-wrap items-center gap-3 mb-4">
+          <h1 className="text-2xl font-bold text-gray-900">Settings</h1>
+          {dirty && (
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-100 px-2.5 py-1 text-xs font-medium text-amber-800">
+              <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+              Unsaved changes
+            </span>
+          )}
+        </div>
+        <nav aria-label="Settings sections" className="flex flex-wrap gap-1 border-b border-gray-200 mb-6">
+          {SECTIONS.map((s) => (
+            <NavLink
+              key={s.key}
+              to={`/admin/settings/${s.key}`}
+              className={({ isActive }) =>
+                `-mb-px flex items-center gap-1.5 border-b-2 px-3 py-2 text-sm font-medium transition-colors ${
+                  isActive
+                    ? 'border-gray-900 text-gray-900'
+                    : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-800'
+                }`
+              }
+            >
+              {s.label}
+              {s.fields.some((field) => dirtyFields.has(field)) && (
+                <span
+                  className="h-1.5 w-1.5 rounded-full bg-amber-500"
+                  title="Unsaved changes in this section"
+                />
+              )}
+            </NavLink>
+          ))}
+        </nav>
+        <form onSubmit={handleSubmit} className="space-y-6 max-w-2xl">
+        {page === 'general' && (
+          <>
+          <section id="resource">
+          <h2 className="text-lg font-semibold text-gray-900 mb-3">Resource</h2>
           <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-4">
             <Field label="Resource name" hint="Used in emails and the booking page">
               <input type="text" required className={inputClass} {...field('resource_name')} />
@@ -102,8 +178,8 @@ export default function AdminSettings() {
           </div>
         </section>
 
-        <section>
-          <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">Booking hours</h2>
+        <section id="booking-hours" className="scroll-mt-16 md:scroll-mt-6">
+          <h2 className="text-lg font-semibold text-gray-900 mb-3">Booking hours</h2>
           <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-4">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <Field label="Open time (HH:MM)">
@@ -126,9 +202,13 @@ export default function AdminSettings() {
             </Field>
           </div>
         </section>
+          </>
+        )}
 
-        <section>
-          <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">New customer restriction</h2>
+        {page === 'booking-rules' && (
+          <>
+        <section id="new-customer-restriction" className="scroll-mt-16 md:scroll-mt-6">
+          <h2 className="text-lg font-semibold text-gray-900 mb-3">New customer restriction</h2>
           <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-4">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <Field label="Start date">
@@ -176,8 +256,56 @@ export default function AdminSettings() {
           </div>
         </section>
 
-        <section>
-          <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">Billing</h2>
+        <section id="new-user-gate" className="scroll-mt-16 md:scroll-mt-6">
+          <h2 className="text-lg font-semibold text-gray-900 mb-3">New user gate</h2>
+          <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-4">
+            <label className="flex items-start gap-2 text-sm text-gray-700">
+              <input
+                type="checkbox"
+                checked={gate.enabled}
+                onChange={(e) => updateGate({ enabled: e.target.checked })}
+                className="mt-0.5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+              />
+              <span>
+                Ask a question before booking and send self-reported new customers to trainer hours.
+              </span>
+            </label>
+            <Field
+              label="Question"
+              hint="Shown before the date picker. Phrase it so “Yes” means the customer has used the space before."
+            >
+              <input
+                type="text"
+                className={inputClass}
+                value={gate.question}
+                onChange={(e) => updateGate({ question: e.target.value })}
+                placeholder={DEFAULT_NEW_USER_QUESTION}
+              />
+            </Field>
+            <Field
+              label="Trainer hours"
+              hint="New customers can only book during these weekly hours. Normal booking hours do not apply to them."
+            >
+              <NewUserScheduleEditor
+                windows={gate.schedule}
+                onChange={(schedule) => updateGate({ schedule })}
+              />
+            </Field>
+            {gate.enabled && gate.schedule.length === 0 && (
+              <p className="text-xs text-amber-600">
+                No trainer hours configured: new customers will see no available slots.
+              </p>
+            )}
+          </div>
+        </section>
+
+          </>
+        )}
+
+        {page === 'operations' && (
+          <>
+        <section id="billing" className="scroll-mt-16 md:scroll-mt-6">
+          <h2 className="text-lg font-semibold text-gray-900 mb-3">Billing</h2>
           <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-4">
             <Field
               label="Auto-charge delay (minutes)"
@@ -188,8 +316,8 @@ export default function AdminSettings() {
           </div>
         </section>
 
-        <section>
-          <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">Marketing</h2>
+        <section id="marketing" className="scroll-mt-16 md:scroll-mt-6">
+          <h2 className="text-lg font-semibold text-gray-900 mb-3">Marketing</h2>
           <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-4">
             <Field
               label="Referral sources"
@@ -203,8 +331,8 @@ export default function AdminSettings() {
           </div>
         </section>
 
-        <section>
-          <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">Emails</h2>
+        <section id="emails" className="scroll-mt-16 md:scroll-mt-6">
+          <h2 className="text-lg font-semibold text-gray-900 mb-3">Emails</h2>
           <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-4">
             <Field label="Send reminder N hours before" hint="0 to disable">
               <input type="number" min="0" required className={inputClass} {...numberField('reminder_hours_before')} />
@@ -223,9 +351,13 @@ export default function AdminSettings() {
             </Field>
           </div>
         </section>
+          </>
+        )}
 
-        <section>
-          <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">Legal</h2>
+        {page === 'content' && (
+          <>
+        <section id="legal" className="scroll-mt-16 md:scroll-mt-6">
+          <h2 className="text-lg font-semibold text-gray-900 mb-3">Legal</h2>
           <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-4">
             <Field
               label="Terms & Conditions content"
@@ -249,6 +381,8 @@ export default function AdminSettings() {
             </Field>
           </div>
         </section>
+          </>
+        )}
 
         {error && (
           <div className="rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm px-3 py-2">{error}</div>
@@ -264,13 +398,133 @@ export default function AdminSettings() {
           </button>
           {saved && <span className="text-sm text-green-600 font-medium">Saved!</span>}
         </div>
-      </form>
+        </form>
+      </div>
     </div>
   )
 }
 
 const inputClass =
   'w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500'
+
+// Settings subsections, each rendered at /admin/settings/<key>. The keys list
+// which fields belong to the subsection so the tabs can flag unsaved edits.
+type SectionKey = 'general' | 'booking-rules' | 'operations' | 'content'
+
+const SECTIONS: { key: SectionKey; label: string; fields: (keyof Settings)[] }[] = [
+  {
+    key: 'general',
+    label: 'General',
+    fields: [
+      'resource_name',
+      'hourly_rate_cents',
+      'currency',
+      'timezone',
+      'bookable_start',
+      'bookable_end',
+      'min_hours',
+      'max_hours',
+      'min_lead_hours',
+    ],
+  },
+  {
+    key: 'booking-rules',
+    label: 'Booking rules',
+    fields: ['new_customer_restriction', 'new_user_gate'],
+  },
+  {
+    key: 'operations',
+    label: 'Operations',
+    fields: ['auto_charge_delay_minutes', 'referral_sources', 'reminder_hours_before', 'notification_emails'],
+  },
+  {
+    key: 'content',
+    label: 'Content',
+    fields: ['terms_content', 'privacy_content'],
+  },
+]
+
+const isSectionKey = (value: string): value is SectionKey =>
+  SECTIONS.some((section) => section.key === value)
+
+
+const DEFAULT_NEW_USER_QUESTION = 'Have you used this space before?'
+
+const WEEKDAYS = [
+  { value: 1, label: 'Monday' },
+  { value: 2, label: 'Tuesday' },
+  { value: 3, label: 'Wednesday' },
+  { value: 4, label: 'Thursday' },
+  { value: 5, label: 'Friday' },
+  { value: 6, label: 'Saturday' },
+  { value: 0, label: 'Sunday' },
+]
+
+function NewUserScheduleEditor({
+  windows,
+  onChange,
+}: {
+  windows: NewUserWindow[]
+  onChange: (windows: NewUserWindow[]) => void
+}) {
+  const byWeekday = new Map(windows.map((w) => [w.weekday, w]))
+
+  const setWindow = (weekday: number, patch: Partial<NewUserWindow>) => {
+    const current = byWeekday.get(weekday) ?? { weekday, start: '09:00', end: '17:00' }
+    const next: NewUserWindow = { ...current, ...patch, weekday }
+    onChange([...windows.filter((w) => w.weekday !== weekday), next].sort((a, b) => a.weekday - b.weekday))
+  }
+
+  const toggle = (weekday: number, enabled: boolean) => {
+    if (enabled) {
+      if (!byWeekday.has(weekday)) {
+        onChange([...windows, { weekday, start: '09:00', end: '17:00' }].sort((a, b) => a.weekday - b.weekday))
+      }
+    } else {
+      onChange(windows.filter((w) => w.weekday !== weekday))
+    }
+  }
+
+  return (
+    <div className="space-y-2">
+      {WEEKDAYS.map(({ value, label }) => {
+        const dayWindow = byWeekday.get(value)
+        return (
+          <div key={value} className="flex flex-wrap items-center gap-2">
+            <label className="flex items-center gap-2 w-28 shrink-0 text-sm text-gray-700">
+              <input
+                type="checkbox"
+                checked={!!dayWindow}
+                onChange={(e) => toggle(value, e.target.checked)}
+                className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+              />
+              {label}
+            </label>
+            {dayWindow ? (
+              <>
+                <input
+                  type="time"
+                  value={dayWindow.start}
+                  onChange={(e) => setWindow(value, { start: e.target.value })}
+                  className="rounded-lg border border-gray-300 px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                <span className="text-sm text-gray-400">to</span>
+                <input
+                  type="time"
+                  value={dayWindow.end}
+                  onChange={(e) => setWindow(value, { end: e.target.value })}
+                  className="rounded-lg border border-gray-300 px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </>
+            ) : (
+              <span className="text-xs text-gray-400">Unavailable</span>
+            )}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
 
 function Field({
   label,

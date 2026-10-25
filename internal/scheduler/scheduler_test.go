@@ -6,12 +6,12 @@ import (
 	"log/slog"
 	"os"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/spencercornish/booklab/internal/db"
 	emailsvc "github.com/spencercornish/booklab/internal/email"
+	"github.com/spencercornish/booklab/internal/stripe/stripetest"
 )
 
 func testDSN() string {
@@ -41,27 +41,6 @@ func resetSettingsUTC(t *testing.T, ctx context.Context, q *db.Queries) {
 	}
 }
 
-type countingStripe struct {
-	chargeCalls atomic.Int32
-}
-
-func (c *countingStripe) CreateSetupIntent(string) (string, string, error) {
-	panic("CreateSetupIntent not used in scheduler tests")
-}
-
-func (c *countingStripe) GetPaymentMethodFromSetupIntent(string) (string, error) {
-	panic("GetPaymentMethodFromSetupIntent not used in scheduler tests")
-}
-
-func (c *countingStripe) ChargePaymentMethod(string, int64, string, string, string) (string, string, error) {
-	c.chargeCalls.Add(1)
-	return "pi_sched_test", "https://stripe.test/receipt", nil
-}
-
-func (c *countingStripe) DetachPaymentMethod(string) error {
-	return nil
-}
-
 func TestAutoCharge_completed_concurrentOnlyOneCharge(t *testing.T) {
 	dsn := testDSN()
 	if dsn == "" {
@@ -82,7 +61,7 @@ func TestAutoCharge_completed_concurrentOnlyOneCharge(t *testing.T) {
 
 	start := time.Date(2032, 4, 1, 12, 0, 0, 0, time.UTC)
 	end := start.Add(2 * time.Hour)
-	b, err := q.CreateBooking(ctx, "Sam", "sam@example.com", nil, start, end, "si_sched", "pm_sched_1")
+	b, err := q.CreateBooking(ctx, "Sam", "sam@example.com", nil, start, end, "si_sched", "pm_sched_1", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,7 +72,7 @@ func TestAutoCharge_completed_concurrentOnlyOneCharge(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	st := &countingStripe{}
+	st := stripetest.NewCounting()
 	emailSvc := emailsvc.New("127.0.0.1", 1025, "", "", "sched@localhost", slog.New(slog.DiscardHandler))
 	s := New(q, emailSvc, st, "http://127.0.0.1:8080", slog.New(slog.DiscardHandler))
 
@@ -112,7 +91,7 @@ func TestAutoCharge_completed_concurrentOnlyOneCharge(t *testing.T) {
 	}
 	wg.Wait()
 
-	if got := st.chargeCalls.Load(); got != 1 {
+	if got := st.ChargeCalls(); got != 1 {
 		t.Fatalf("ChargePaymentMethod calls = %d, want 1", got)
 	}
 	nb, err := q.GetBookingByID(ctx, b.ID)
@@ -122,28 +101,6 @@ func TestAutoCharge_completed_concurrentOnlyOneCharge(t *testing.T) {
 	if nb.Status != db.BookingStatusCharged {
 		t.Fatalf("booking status = %s, want charged", nb.Status)
 	}
-}
-
-// scriptedStripe returns errs from successive charges and records the idempotency keys.
-type scriptedStripe struct {
-	countingStripe
-	mu   sync.Mutex
-	errs []error
-	keys []string
-}
-
-func (c *scriptedStripe) ChargePaymentMethod(_ string, _ int64, _ string, _ string, key string) (string, string, error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.keys = append(c.keys, key)
-	if len(c.errs) > 0 {
-		err := c.errs[0]
-		c.errs = c.errs[1:]
-		if err != nil {
-			return "", "", err
-		}
-	}
-	return "pi_sched_test", "https://stripe.test/receipt", nil
 }
 
 // An auto-charge whose outcome is unknown must be retried with the same idempotency key,
@@ -167,7 +124,7 @@ func TestAutoCharge_unknownOutcomeRetryReusesKey(t *testing.T) {
 	resetSettingsUTC(t, ctx, q)
 
 	start := time.Date(2032, 4, 1, 12, 0, 0, 0, time.UTC)
-	b, err := q.CreateBooking(ctx, "Sam", "sam@example.com", nil, start, start.Add(2*time.Hour), "si_sched_retry", "pm_sched_2")
+	b, err := q.CreateBooking(ctx, "Sam", "sam@example.com", nil, start, start.Add(2*time.Hour), "si_sched_retry", "pm_sched_2", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -178,7 +135,7 @@ func TestAutoCharge_unknownOutcomeRetryReusesKey(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	st := &scriptedStripe{errs: []error{errors.New("read tcp: connection reset by peer"), nil}}
+	st := stripetest.NewScripted(errors.New("read tcp: connection reset by peer"), nil)
 	emailSvc := emailsvc.New("127.0.0.1", 1025, "", "", "sched@localhost", slog.New(slog.DiscardHandler))
 	s := New(q, emailSvc, st, "http://127.0.0.1:8080", slog.New(slog.DiscardHandler))
 	settings, err := q.GetSettings(ctx)
@@ -190,7 +147,7 @@ func TestAutoCharge_unknownOutcomeRetryReusesKey(t *testing.T) {
 	if got := s.autoChargeCompleted(ctx, settings); got != 1 {
 		t.Fatalf("charged %d, want 1", got)
 	}
-	if len(st.keys) != 2 || st.keys[0] != st.keys[1] {
-		t.Fatalf("idempotency keys %q, want the same key twice", st.keys)
+	if keys := st.Keys(); len(keys) != 2 || keys[0] != keys[1] {
+		t.Fatalf("idempotency keys %q, want the same key twice", keys)
 	}
 }

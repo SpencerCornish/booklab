@@ -32,7 +32,8 @@ export default function App() {
           <Route path="closures" element={<AdminClosures />} />
           <Route path="insights" element={<AdminInsights />} />
           <Route path="users" element={<AdminUsers />} />
-          <Route path="settings" element={<AdminSettings />} />
+          <Route path="settings" element={<Navigate to="/admin/settings/general" replace />} />
+          <Route path="settings/:section" element={<AdminSettings />} />
         </Route>
 
         <Route path="*" element={<Navigate to="/" replace />} />

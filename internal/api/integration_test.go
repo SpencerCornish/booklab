@@ -4,7 +4,6 @@ import (
 	"context"
 	"log/slog"
 	"os"
-	"sync"
 	"testing"
 	"time"
 
@@ -54,58 +53,25 @@ func resetSettingsUTC(t *testing.T, ctx context.Context, q *db.Queries) {
 	maxH := int32(8)
 	hr := int32(1000)
 	cur := "usd"
+	gateEnabled := false
+	gateSchedule := []db.NewUserWindow{}
+	gateQuestion := "Have you used this space before?"
 	_, err := q.UpdateSettings(ctx, db.UpdateSettingsParams{
-		Timezone:        &tz,
-		BookableStart:   &bs,
-		BookableEnd:     &be,
-		MinHours:        &minH,
-		MaxHours:        &maxH,
-		HourlyRateCents: &hr,
-		Currency:        &cur,
+		Timezone:            &tz,
+		BookableStart:       &bs,
+		BookableEnd:         &be,
+		MinHours:            &minH,
+		MaxHours:            &maxH,
+		HourlyRateCents:     &hr,
+		Currency:            &cur,
+		NewUserGateEnabled:  &gateEnabled,
+		NewUserGateQuestion: &gateQuestion,
+		NewUserGateSchedule: &gateSchedule,
 	})
 	if err != nil {
 		t.Fatalf("reset settings: %v", err)
 	}
 }
 
-// mockStripe implements stripe.Client for tests; counts ChargePaymentMethod calls and
-// records their idempotency keys. chargeErrs are returned by successive charges.
-type mockStripe struct {
-	mu          sync.Mutex
-	chargeCalls int
-	chargeKeys  []string
-	chargeErrs  []error
-}
-
-func (m *mockStripe) CreateSetupIntent(email string) (string, string, error) {
-	return "si_test_mock", "seti_secret_mock", nil
-}
-
-func (m *mockStripe) GetPaymentMethodFromSetupIntent(setupIntentID string) (string, error) {
-	return "pm_test_mock", nil
-}
-
-func (m *mockStripe) ChargePaymentMethod(pmID string, amountCents int64, currency, description, idempotencyKey string) (string, string, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.chargeCalls++
-	m.chargeKeys = append(m.chargeKeys, idempotencyKey)
-	if len(m.chargeErrs) > 0 {
-		err := m.chargeErrs[0]
-		m.chargeErrs = m.chargeErrs[1:]
-		if err != nil {
-			return "", "", err
-		}
-	}
-	return "pi_test_mock", "https://stripe.test/receipt", nil
-}
-
-func (m *mockStripe) DetachPaymentMethod(pmID string) error {
-	return nil
-}
-
-func (m *mockStripe) chargeCount() int {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.chargeCalls
-}
+// The Stripe test double lives in internal/stripe/stripetest and is shared by
+// every suite (api, scheduler, and the functional tests via STRIPE_FAKE=1).

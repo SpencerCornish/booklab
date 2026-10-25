@@ -7,6 +7,7 @@ A self-hosted hourly resource booking system with post-use Stripe billing. Built
 - **Public booking page** - date picker, visual time-slot grid, multi-hour selection
 - **Stripe card-on-file** - card saved at booking, charged after the session by an admin
 - **Admin panel** - bookings list, charge flow, closure management, settings editor
+- **New-user gate (optional)** - a pre-schedule question routes self-reported new customers to trainer-only weekly hours; the date picker greys out days with no matching availability
 - **Email notifications** - confirmation, reminder, cancellation, receipt (SMTP)
 - **DB-level conflict prevention** - PostgreSQL exclusion constraint prevents double-bookings
 - **Configurable** - all branding via env vars, suitable for any resource

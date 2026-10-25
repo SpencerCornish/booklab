@@ -11,9 +11,18 @@ func dateOnly(t time.Time, loc *time.Location) time.Time {
 	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, loc)
 }
 
+// dateOnlyStored treats t as a DATE column value scanned by pgx (UTC midnight)
+// and returns midnight in loc of the stored calendar date. Interpreting a
+// scanned DATE with dateOnly would shift the date by one day whenever loc is
+// behind UTC, because the instant's local components land on the previous day.
+func dateOnlyStored(t time.Time, loc *time.Location) time.Time {
+	u := t.UTC()
+	return time.Date(u.Year(), u.Month(), u.Day(), 0, 0, 0, 0, loc)
+}
+
 func dateInClosureRange(d time.Time, c *db.Closure, loc *time.Location) bool {
-	from := dateOnly(c.StartDate, loc)
-	to := dateOnly(c.EndDate, loc)
+	from := dateOnlyStored(c.StartDate, loc)
+	to := dateOnlyStored(c.EndDate, loc)
 	return !d.Before(from) && !d.After(to)
 }
 
@@ -39,6 +48,9 @@ func slotOverlapsPartialClosure(slotStart, slotEnd time.Time, c *db.Closure, loc
 		return false
 	}
 	d := slotStart.In(loc)
+	if !dateInClosureRange(dateOnly(d, loc), c, loc) {
+		return false
+	}
 	sh, sm, _ := c.StartTime.Clock()
 	eh, em, _ := c.EndTime.Clock()
 	cStart := time.Date(d.Year(), d.Month(), d.Day(), sh, sm, 0, 0, loc)
@@ -56,8 +68,8 @@ func bookingOverlapsClosure(bookingStart, bookingEnd time.Time, c *db.Closure, l
 	bookFrom := dateOnly(bs, loc)
 	bookTo := dateOnly(be.Add(-time.Nanosecond), loc)
 
-	closureFrom := dateOnly(c.StartDate, loc)
-	closureTo := dateOnly(c.EndDate, loc)
+	closureFrom := dateOnlyStored(c.StartDate, loc)
+	closureTo := dateOnlyStored(c.EndDate, loc)
 
 	overlapStart := bookFrom
 	if closureFrom.After(overlapStart) {

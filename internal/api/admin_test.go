@@ -16,6 +16,7 @@ import (
 
 	"github.com/spencercornish/booklab/internal/config"
 	emailsvc "github.com/spencercornish/booklab/internal/email"
+	"github.com/spencercornish/booklab/internal/stripe/stripetest"
 )
 
 func testConfig() *config.Config {
@@ -32,7 +33,7 @@ func TestAdminChargeBooking_idempotentSecondRequest(t *testing.T) {
 	truncateBookingData(t, ctx, pool)
 	resetSettingsUTC(t, ctx, q)
 
-	ms := &mockStripe{}
+	ms := stripetest.NewCounting()
 	emailSvc := emailsvc.New("127.0.0.1", 1025, "", "", "booklab@localhost", testLogger())
 	srv := New(testConfig(), q, ms, emailSvc, nil, testLogger())
 	ts := httptest.NewServer(srv.Handler())
@@ -49,7 +50,7 @@ func TestAdminChargeBooking_idempotentSecondRequest(t *testing.T) {
 	// Completed booking eligible for charge
 	start := time.Date(2031, 3, 1, 12, 0, 0, 0, time.UTC)
 	end := start.Add(2 * time.Hour)
-	b, err := q.CreateBooking(ctx, "Pat", "pat@example.com", nil, start, end, "si_x", "pm_test_123")
+	b, err := q.CreateBooking(ctx, "Pat", "pat@example.com", nil, start, end, "si_x", "pm_test_123", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,7 +71,7 @@ func TestAdminChargeBooking_idempotentSecondRequest(t *testing.T) {
 		body, _ := io.ReadAll(resp1.Body)
 		t.Fatalf("first charge: status %d body %s", resp1.StatusCode, body)
 	}
-	if c := ms.chargeCount(); c != 1 {
+	if c := ms.ChargeCalls(); c != 1 {
 		t.Fatalf("stripe charge calls after first request = %d, want 1", c)
 	}
 
@@ -83,7 +84,7 @@ func TestAdminChargeBooking_idempotentSecondRequest(t *testing.T) {
 		body, _ := io.ReadAll(resp2.Body)
 		t.Fatalf("second charge: status %d want 409 body %s", resp2.StatusCode, body)
 	}
-	if c := ms.chargeCount(); c != 1 {
+	if c := ms.ChargeCalls(); c != 1 {
 		t.Fatalf("stripe charge calls after second request = %d, want 1 (no second Stripe call)", c)
 	}
 }
@@ -94,7 +95,7 @@ func TestAdminCSRF_mutatingWithoutHeader(t *testing.T) {
 	truncateBookingData(t, ctx, pool)
 	resetSettingsUTC(t, ctx, q)
 
-	ms := &mockStripe{}
+	ms := stripetest.New()
 	emailSvc := emailsvc.New("127.0.0.1", 1025, "", "", "booklab@localhost", testLogger())
 	srv := New(testConfig(), q, ms, emailSvc, nil, testLogger())
 	ts := httptest.NewServer(srv.Handler())
@@ -137,7 +138,7 @@ func TestCORS_disallowedOriginNoACAO(t *testing.T) {
 	pool, q := openTestPool(t)
 	truncateBookingData(t, ctx, pool)
 
-	ms := &mockStripe{}
+	ms := stripetest.New()
 	emailSvc := emailsvc.New("127.0.0.1", 1025, "", "", "booklab@localhost", testLogger())
 	srv := New(testConfig(), q, ms, emailSvc, nil, testLogger())
 	ts := httptest.NewServer(srv.Handler())
@@ -161,7 +162,7 @@ func TestCORS_allowedOriginReflectsACAO(t *testing.T) {
 	pool, q := openTestPool(t)
 	truncateBookingData(t, ctx, pool)
 
-	ms := &mockStripe{}
+	ms := stripetest.New()
 	emailSvc := emailsvc.New("127.0.0.1", 1025, "", "", "booklab@localhost", testLogger())
 	srv := New(testConfig(), q, ms, emailSvc, nil, testLogger())
 	ts := httptest.NewServer(srv.Handler())
@@ -184,7 +185,7 @@ func TestAdminLogin_bruteForce429(t *testing.T) {
 	pool, q := openTestPool(t)
 	truncateBookingData(t, ctx, pool)
 
-	ms := &mockStripe{}
+	ms := stripetest.New()
 	emailSvc := emailsvc.New("127.0.0.1", 1025, "", "", "booklab@localhost", testLogger())
 	srv := New(testConfig(), q, ms, emailSvc, nil, testLogger())
 	ts := httptest.NewServer(srv.Handler())
@@ -220,7 +221,7 @@ func TestAdminLogout_revokesSession(t *testing.T) {
 	truncateBookingData(t, ctx, pool)
 	resetSettingsUTC(t, ctx, q)
 
-	ms := &mockStripe{}
+	ms := stripetest.New()
 	emailSvc := emailsvc.New("127.0.0.1", 1025, "", "", "booklab@localhost", testLogger())
 	srv := New(testConfig(), q, ms, emailSvc, nil, testLogger())
 	ts := httptest.NewServer(srv.Handler())
@@ -321,7 +322,7 @@ func TestAdminUpdateBooking_rejectsCompletedWithoutPaymentMethod(t *testing.T) {
 	truncateBookingData(t, ctx, pool)
 	resetSettingsUTC(t, ctx, q)
 
-	ms := &mockStripe{}
+	ms := stripetest.New()
 	emailSvc := emailsvc.New("127.0.0.1", 1025, "", "", "booklab@localhost", testLogger())
 	srv := New(testConfig(), q, ms, emailSvc, nil, testLogger())
 	ts := httptest.NewServer(srv.Handler())
@@ -337,7 +338,7 @@ func TestAdminUpdateBooking_rejectsCompletedWithoutPaymentMethod(t *testing.T) {
 
 	start := time.Date(2031, 4, 1, 12, 0, 0, 0, time.UTC)
 	end := start.Add(2 * time.Hour)
-	b, err := q.CreateBooking(ctx, "Pat", "pat@example.com", nil, start, end, "si_orphan", "")
+	b, err := q.CreateBooking(ctx, "Pat", "pat@example.com", nil, start, end, "si_orphan", "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -431,5 +432,57 @@ func TestAdminSettings_newCustomerRestriction(t *testing.T) {
 	}
 	if stored.NewCustomerBlockStart != nil || stored.NewCustomerBlockEnd != nil || stored.NewCustomerBlockMessage != "" {
 		t.Fatalf("clear: stored window still set: %+v", stored)
+	}
+}
+
+func TestAdminBookings_invalidStatusIsBadRequest(t *testing.T) {
+	ctx := context.Background()
+	pool, q := openTestPool(t)
+	truncateBookingData(t, ctx, pool)
+	resetSettingsUTC(t, ctx, q)
+
+	emailSvc := emailsvc.New("127.0.0.1", 1025, "", "", "booklab@localhost", testLogger())
+	srv := New(testConfig(), q, stripetest.New(), emailSvc, nil, testLogger())
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+
+	hash, err := bcrypt.GenerateFromPassword([]byte("s3cret!"), bcrypt.MinCost)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := q.CreateAdminUser(ctx, "admin", string(hash)); err != nil {
+		t.Fatal(err)
+	}
+	sess := loginAndSession(t, ts.URL, "admin", "s3cret!")
+	csrf := "testcsrf01234567890123456789012"
+
+	// List filter with a non-enum status: 400, not a Postgres cast error.
+	req := mustNewRequest(t, http.MethodGet, ts.URL+"/api/admin/bookings?status=bogus", nil)
+	addAdminCookies(req, sess, csrf)
+	resp := doReq(t, ts.Client(), req)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("list ?status=bogus: status %d body %s", resp.StatusCode, b)
+	}
+
+	// PATCH with a non-enum status: same class of input, same 400.
+	req2 := mustNewRequest(t, http.MethodPatch, ts.URL+"/api/admin/bookings/1", strings.NewReader(`{"status":"bogus"}`))
+	addAdminCookies(req2, sess, csrf)
+	req2.Header.Set("X-CSRF-Token", csrf)
+	resp2 := doReq(t, ts.Client(), req2)
+	defer resp2.Body.Close()
+	if resp2.StatusCode != http.StatusBadRequest {
+		b, _ := io.ReadAll(resp2.Body)
+		t.Fatalf("PATCH bogus status: status %d body %s", resp2.StatusCode, b)
+	}
+
+	// Valid filters still work.
+	req3 := mustNewRequest(t, http.MethodGet, ts.URL+"/api/admin/bookings?status=confirmed", nil)
+	addAdminCookies(req3, sess, csrf)
+	resp3 := doReq(t, ts.Client(), req3)
+	defer resp3.Body.Close()
+	if resp3.StatusCode != http.StatusOK {
+		t.Fatalf("list ?status=confirmed: status %d", resp3.StatusCode)
 	}
 }

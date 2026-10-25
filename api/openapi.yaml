@@ -61,7 +61,7 @@ paths:
     get:
       tags: [public]
       summary: Get available time slots for a date
-      description: Returns list of available 1-hour slots accounting for bookings, closures, and configured hours.
+      description: Returns list of available 1-hour slots accounting for bookings, closures, and configured hours. When the new-user gate is enabled, new_user=true returns slots from the trainer's weekly schedule instead of the normal bookable hours.
       operationId: getAvailability
       parameters:
         - name: date
@@ -71,6 +71,12 @@ paths:
             type: string
             format: date
             example: "2026-06-01"
+        - name: new_user
+          in: query
+          required: false
+          description: Self-reported answer to the pre-schedule question. Only meaningful while the new-user gate is enabled.
+          schema:
+            type: boolean
       responses:
         "200":
           description: OK
@@ -78,6 +84,38 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/AvailabilityResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
+  /availability/days:
+    get:
+      tags: [public]
+      summary: List upcoming dates that have bookable time
+      description: Returns the dates within the coming days that offer at least min_hours of contiguous bookable time, honouring closures, existing bookings, and minimum notice. Uses the trainer's weekly schedule when the new-user gate is enabled and new_user=true. Lets clients grey out days with no availability.
+      operationId: getAvailableDays
+      parameters:
+        - name: days
+          in: query
+          required: false
+          description: How many days from today to scan. Defaults to 60, capped at 90.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 90
+            default: 60
+        - name: new_user
+          in: query
+          required: false
+          description: Self-reported answer to the pre-schedule question. Only meaningful while the new-user gate is enabled.
+          schema:
+            type: boolean
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AvailableDaysResponse"
         "400":
           $ref: "#/components/responses/BadRequest"
 
@@ -709,6 +747,50 @@ components:
           oneOf:
             - $ref: "#/components/schemas/NewCustomerRestriction"
             - type: "null"
+        new_user_gate:
+          description: Present only while the pre-schedule gate is enabled. The trainer schedule itself is not exposed.
+          oneOf:
+            - $ref: "#/components/schemas/NewUserGatePublic"
+            - type: "null"
+
+    NewUserGatePublic:
+      type: object
+      required: [enabled, question]
+      properties:
+        enabled:
+          type: boolean
+        question:
+          type: string
+          example: "Have you used this space before?"
+
+    NewUserWindow:
+      type: object
+      required: [weekday, start, end]
+      properties:
+        weekday:
+          type: integer
+          minimum: 0
+          maximum: 6
+          description: 0 = Sunday … 6 = Saturday.
+        start:
+          type: string
+          example: "15:00"
+        end:
+          type: string
+          example: "20:00"
+
+    NewUserGate:
+      type: object
+      required: [enabled, question, schedule]
+      properties:
+        enabled:
+          type: boolean
+        question:
+          type: string
+        schedule:
+          type: array
+          items:
+            $ref: "#/components/schemas/NewUserWindow"
 
     NewCustomerRestriction:
       type: object
@@ -746,6 +828,9 @@ components:
               oneOf:
                 - $ref: "#/components/schemas/NewCustomerRestriction"
                 - type: "null"
+            new_user_gate:
+              description: The gate configuration; schedule may be empty even while enabled.
+              $ref: "#/components/schemas/NewUserGate"
 
     LegalContent:
       type: object
@@ -795,6 +880,9 @@ components:
           oneOf:
             - $ref: "#/components/schemas/NewCustomerRestriction"
             - type: "null"
+        new_user_gate:
+          description: Omit to leave the gate unchanged. Windows must not overlap on the same weekday; a blank question falls back to the default.
+          $ref: "#/components/schemas/NewUserGate"
 
     AvailabilityResponse:
       type: object
@@ -812,6 +900,17 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/TimeSlot"
+
+    AvailableDaysResponse:
+      type: object
+      required: [available_dates]
+      properties:
+        available_dates:
+          type: array
+          description: Dates (YYYY-MM-DD, ascending) with at least one bookable selection. Days not listed have no availability.
+          items:
+            type: string
+            format: date
 
     TimeSlot:
       type: object
@@ -847,6 +946,9 @@ components:
         end_time:
           type: string
           format: date-time
+        new_user:
+          type: boolean
+          description: Self-reported answer to the pre-schedule question. Required while the new-user gate is enabled; ignored otherwise.
 
     PrepareBookingRequest:
       type: object
@@ -861,6 +963,9 @@ components:
         end_time:
           type: string
           format: date-time
+        new_user:
+          type: boolean
+          description: Self-reported answer to the pre-schedule question. Required while the new-user gate is enabled; ignored otherwise.
 
     PrepareBookingResponse:
       type: object
@@ -919,6 +1024,10 @@ components:
             amount_cents:
               type: integer
               nullable: true
+            is_new_user:
+              type: boolean
+              nullable: true
+              description: Self-reported answer to the pre-schedule question; null when the gate was disabled or not asked.
 
     UpdateBookingRequest:
       type: object
