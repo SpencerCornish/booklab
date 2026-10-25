@@ -78,7 +78,7 @@ func (s *Server) Handler() http.Handler {
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins:   s.cfg.AllowedCORSOrigins(),
 		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
-		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-CSRF-Token"},
+		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-CSRF-Token", "X-Secret-Token"},
 		AllowCredentials: true,
 	}))
 
@@ -89,6 +89,7 @@ func (s *Server) Handler() http.Handler {
 		r.Get("/settings/public", s.handleGetPublicSettings)
 		r.Get("/terms", s.handleGetTerms)
 		r.Get("/privacy", s.handleGetPrivacy)
+		r.Get("/secret-link/verify", s.handleSecretLinkVerify)
 		r.Get("/availability", s.handleGetAvailability)
 		r.Get("/availability/days", s.handleGetAvailableDays)
 		r.Post("/bookings/prepare", s.handlePrepareBooking)
@@ -108,6 +109,7 @@ func (s *Server) Handler() http.Handler {
 			r.Get("/admin/settings", s.handleAdminGetSettings)
 			r.Put("/admin/settings", s.handleAdminUpdateSettings)
 			r.Get("/admin/insights", s.handleAdminGetInsights)
+			r.Post("/admin/secret-link/rotate", s.handleAdminRotateSecretLink)
 			r.Get("/admin/users", s.handleAdminListUsers)
 			r.Post("/admin/users", s.handleAdminCreateUser)
 			r.Put("/admin/users/me/password", s.handleAdminChangePassword)

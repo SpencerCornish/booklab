@@ -32,5 +32,5 @@ RETURNING *;
 -- name: SetSecretLinkToken :one
 -- Only called by the admin rotate endpoint and the enable-time bootstrap, so
 -- the previous token is unconditionally replaced: rotation revokes the old
--- link immediately.
-UPDATE settings SET secret_link_token = $1 WHERE id = 1 RETURNING *;
+-- link immediately. An empty argument clears the token.
+UPDATE settings SET secret_link_token = NULLIF($1, '') WHERE id = 1 RETURNING *;

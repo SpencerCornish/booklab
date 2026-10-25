@@ -15,6 +15,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 
 	"github.com/spencercornish/booklab/internal/config"
+	"github.com/spencercornish/booklab/internal/db"
 	emailsvc "github.com/spencercornish/booklab/internal/email"
 	"github.com/spencercornish/booklab/internal/stripe/stripetest"
 )
@@ -26,6 +27,9 @@ func testConfig() *config.Config {
 		Port:               8080,
 	}
 }
+
+// strptr returns a pointer to s (used to build optional Stripe identifiers).
+func strptr(s string) *string { return &s }
 
 func TestAdminChargeBooking_idempotentSecondRequest(t *testing.T) {
 	ctx := context.Background()
@@ -50,7 +54,7 @@ func TestAdminChargeBooking_idempotentSecondRequest(t *testing.T) {
 	// Completed booking eligible for charge
 	start := time.Date(2031, 3, 1, 12, 0, 0, 0, time.UTC)
 	end := start.Add(2 * time.Hour)
-	b, err := q.CreateBooking(ctx, "Pat", "pat@example.com", nil, start, end, "si_x", "pm_test_123", nil)
+	b, err := q.CreateBooking(ctx, db.CreateBookingParams{Name: "Pat", Email: "pat@example.com", Start: start, End: end, SetupIntentID: strptr("si_x"), PaymentMethodID: strptr("pm_test_123")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -338,7 +342,7 @@ func TestAdminUpdateBooking_rejectsCompletedWithoutPaymentMethod(t *testing.T) {
 
 	start := time.Date(2031, 4, 1, 12, 0, 0, 0, time.UTC)
 	end := start.Add(2 * time.Hour)
-	b, err := q.CreateBooking(ctx, "Pat", "pat@example.com", nil, start, end, "si_orphan", "", nil)
+	b, err := q.CreateBooking(ctx, db.CreateBookingParams{Name: "Pat", Email: "pat@example.com", Start: start, End: end, SetupIntentID: strptr("si_orphan")})
 	if err != nil {
 		t.Fatal(err)
 	}

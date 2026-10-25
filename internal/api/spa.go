@@ -77,6 +77,8 @@ func isSPARoute(rawPath string) bool {
 		return true
 	case strings.HasPrefix(p, "/booking/"):
 		return true
+	case strings.HasPrefix(p, "/book/"):
+		return true
 	case strings.HasPrefix(p, "/cancel/"):
 		return true
 	case p == "/terms":

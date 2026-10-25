@@ -81,6 +81,49 @@ func (s *Server) handleGetPrivacy(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// availabilityOpts selects which rule set applies to an availability/booking
+// computation. Secret-link bookings bypass the minimum-notice rule (and, when
+// any_hours is enabled, the bookable-hours window); the new-user gate swaps
+// normal hours for the trainer schedule.
+type availabilityOpts struct {
+	trainerHours   bool // new-user gate windows
+	anyHours       bool // 24/7 mode: full day 00:00–24:00
+	bypassLeadTime bool // skip the minimum-notice (lead time) restriction
+}
+
+// secretLinkAvailabilityOpts maps active secret-link settings onto availability
+// options. Past slots stay unavailable (create still rejects past starts).
+func secretLinkAvailabilityOpts(settings *db.Settings) availabilityOpts {
+	return availabilityOpts{
+		anyHours:       settings.SecretLinkAnyHours,
+		bypassLeadTime: true,
+	}
+}
+
+// windowsForDate returns the bookable windows for the date under opts.
+func windowsForDate(settings *db.Settings, date time.Time, loc *time.Location, opts availabilityOpts) []bookableWindow {
+	switch {
+	case opts.anyHours:
+		// The full local calendar day; AddDate handles 23/25-hour DST days.
+		dayStart := time.Date(date.In(loc).Year(), date.In(loc).Month(), date.In(loc).Day(), 0, 0, 0, 0, loc)
+		return []bookableWindow{{Start: dayStart, End: dayStart.AddDate(0, 0, 1)}}
+	case opts.trainerHours:
+		return newUserWindowsForDate(settings, date, loc)
+	default:
+		start, end := bookableBoundsForDate(date, settings, loc)
+		return []bookableWindow{{Start: start, End: end}}
+	}
+}
+
+// earliestUnderOpts is the earliest start time a booking may have. Bypassing
+// the lead-time rule still forbids past starts, so the floor is "now".
+func earliestUnderOpts(settings *db.Settings, opts availabilityOpts) time.Time {
+	if opts.bypassLeadTime {
+		return time.Now()
+	}
+	return earliestBookableStart(settings)
+}
+
 func (s *Server) handleGetAvailability(w http.ResponseWriter, r *http.Request) {
 	dateStr := r.URL.Query().Get("date")
 	if dateStr == "" {
@@ -105,6 +148,23 @@ func (s *Server) handleGetAvailability(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// A valid secret token switches to link rules: no minimum notice, and
+	// optionally the full 24-hour day. The gate question does not apply to
+	// link bookings, so the new_user param is ignored in that mode.
+	opts := availabilityOpts{}
+	if validateSecretToken(settings, secretTokenFromRequest(r)) {
+		opts = secretLinkAvailabilityOpts(settings)
+	} else {
+		// The gate replaces normal hours with the trainer's weekly schedule for
+		// self-reported new customers.
+		newUser, parseErr := newUserQueryParam(r)
+		if parseErr != nil {
+			s.writeError(w, r, http.StatusBadRequest, "invalid new_user value", parseErr)
+			return
+		}
+		opts.trainerHours = settings.NewUserGateEnabled && newUser
+	}
+
 	// Check if the date falls in a closure. Bounds are the exact requested
 	// calendar day (UTC midnight), so the calendar-date intersection in
 	// ListClosuresInRange returns precisely the closures covering this day.
@@ -125,21 +185,7 @@ func (s *Server) handleGetAvailability(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// The gate replaces normal hours with the trainer's weekly schedule for
-	// self-reported new customers.
-	newUser, parseErr := newUserQueryParam(r)
-	if parseErr != nil {
-		s.writeError(w, r, http.StatusBadRequest, "invalid new_user value", parseErr)
-		return
-	}
-
-	var windows []bookableWindow
-	if settings.NewUserGateEnabled && newUser {
-		windows = newUserWindowsForDate(settings, date, loc)
-	} else {
-		start, end := bookableBoundsForDate(date, settings, loc)
-		windows = []bookableWindow{{Start: start, End: end}}
-	}
+	windows := windowsForDate(settings, date, loc, opts)
 	if len(windows) == 0 {
 		writeJSON(w, http.StatusOK, map[string]any{
 			"date":      dateStr,
@@ -171,7 +217,7 @@ func (s *Server) handleGetAvailability(w http.ResponseWriter, r *http.Request) {
 		Available bool      `json:"available"`
 	}
 
-	earliest := earliestBookableStart(settings)
+	earliest := earliestUnderOpts(settings, opts)
 	slots := make([]slot, 0)
 	for _, w := range windows {
 		for t := w.Start; !t.Add(time.Hour).After(w.End); t = t.Add(time.Hour) {
@@ -229,10 +275,18 @@ func (s *Server) handleGetAvailableDays(w http.ResponseWriter, r *http.Request) 
 	}
 	loc := settingsLocation(settings)
 
-	newUser, err := newUserQueryParam(r)
-	if err != nil {
-		s.writeError(w, r, http.StatusBadRequest, "invalid new_user value", err)
-		return
+	// Same token rule as the per-date endpoint: a valid secret link switches
+	// to link rules instead of the gate's trainer hours.
+	opts := availabilityOpts{}
+	if validateSecretToken(settings, secretTokenFromRequest(r)) {
+		opts = secretLinkAvailabilityOpts(settings)
+	} else {
+		newUser, err := newUserQueryParam(r)
+		if err != nil {
+			s.writeError(w, r, http.StatusBadRequest, "invalid new_user value", err)
+			return
+		}
+		opts.trainerHours = settings.NewUserGateEnabled && newUser
 	}
 
 	now := time.Now().In(loc)
@@ -250,12 +304,8 @@ func (s *Server) handleGetAvailableDays(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Same routing rule as the per-date endpoint: trainer hours replace normal
-	// hours only while the gate is enabled and the customer is self-reported new.
-	trainerHours := settings.NewUserGateEnabled && newUser
-
 	writeJSON(w, http.StatusOK, map[string]any{
-		"available_dates": availableDates(settings, closures, bookings, start, days, loc, trainerHours),
+		"available_dates": availableDates(settings, closures, bookings, start, days, loc, opts),
 	})
 }
 
@@ -290,7 +340,7 @@ func (s *Server) handlePrepareBooking(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if badReq, err := s.validateBookingCreate(r.Context(), req.StartTime, req.EndTime, settings, newUser != nil && *newUser); err != nil {
+	if badReq, err := s.validateBookingCreate(r.Context(), req.StartTime, req.EndTime, settings, newUser != nil && *newUser, bookingValidationOpts{}); err != nil {
 		s.writeError(w, r, http.StatusInternalServerError, "failed to validate booking", err)
 		return
 	} else if badReq != "" {
@@ -401,11 +451,15 @@ func (s *Server) handleCreateBooking(w http.ResponseWriter, r *http.Request) {
 		StartTime     time.Time         `json:"start_time"`
 		EndTime       time.Time         `json:"end_time"`
 		NewUser       *bool             `json:"new_user"`
+		SecretToken   string            `json:"secret_token"`
 	}
 	if !s.readJSONRequest(w, r, &req) {
 		return
 	}
-	if req.SetupIntentID == "" || req.Name == "" || req.Email == "" {
+	// Secret-link bookings carry a token instead of a setup intent; paid
+	// bookings must have both name, email, and a confirmed setup intent.
+	carriedToken := secretTokenFromBooking(r, req.SecretToken)
+	if req.SetupIntentID == "" && carriedToken == "" || req.Name == "" || req.Email == "" {
 		s.writeError(w, r, http.StatusBadRequest, "setup_intent_id, name, and email are required", nil)
 		return
 	}
@@ -417,14 +471,18 @@ func (s *Server) handleCreateBooking(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	existing, err := s.queries.GetBookingBySetupIntentID(r.Context(), req.SetupIntentID)
-	if err == nil {
-		writeJSON(w, http.StatusCreated, map[string]any{"booking": bookingToPublic(existing)})
-		return
-	}
-	if err != pgx.ErrNoRows {
-		s.writeError(w, r, http.StatusInternalServerError, "failed to load booking", err)
-		return
+	if req.SetupIntentID != "" {
+		// Paid bookings are idempotent on the setup intent: a retry after a
+		// succeeded create replays the booking instead of failing on overlap.
+		existing, err := s.queries.GetBookingBySetupIntentID(r.Context(), req.SetupIntentID)
+		if err == nil {
+			writeJSON(w, http.StatusCreated, map[string]any{"booking": bookingToPublic(existing)})
+			return
+		}
+		if err != pgx.ErrNoRows {
+			s.writeError(w, r, http.StatusInternalServerError, "failed to load booking", err)
+			return
+		}
 	}
 
 	// Rate limit after the idempotent replay above, so retries of the same
@@ -437,25 +495,37 @@ func (s *Server) handleCreateBooking(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	pmID, err := s.stripe.GetPaymentMethodFromSetupIntent(req.SetupIntentID)
-	if err != nil {
-		s.writeError(w, r, http.StatusBadRequest, "card not confirmed", err)
-		return
-	}
-
 	settings, err := s.queries.GetSettings(r.Context())
 	if err != nil {
 		s.writeError(w, r, http.StatusInternalServerError, "failed to load settings", err)
 		return
 	}
 
-	newUser, badReq := resolveNewUserAnswer(settings, req.NewUser)
-	if badReq != "" {
-		s.writeError(w, r, http.StatusBadRequest, badReq, nil)
-		return
-	}
+	// A valid token books free: no card, no new-user gate, no new-customer
+	// restriction, no minimum notice. Everything else (durations, closures,
+	// past starts, overlap) is still enforced below.
+	linkMode := validateSecretToken(settings, carriedToken)
 
-	if badReq, err := s.validateBookingCreate(r.Context(), req.StartTime, req.EndTime, settings, newUser != nil && *newUser); err != nil {
+	var pmID string
+	var newUser *bool
+	valOpts := bookingValidationOpts{}
+	if linkMode {
+		valOpts = bookingValidationOpts{bypassLeadTime: true, anyHours: settings.SecretLinkAnyHours}
+	} else {
+		pmID, err = s.stripe.GetPaymentMethodFromSetupIntent(req.SetupIntentID)
+		if err != nil {
+			s.writeError(w, r, http.StatusBadRequest, "card not confirmed", err)
+			return
+		}
+
+		var badReq string
+		newUser, badReq = resolveNewUserAnswer(settings, req.NewUser)
+		if badReq != "" {
+			s.writeError(w, r, http.StatusBadRequest, badReq, nil)
+			return
+		}
+	}
+	if badReq, err := s.validateBookingCreate(r.Context(), req.StartTime, req.EndTime, settings, newUser != nil && *newUser, valOpts); err != nil {
 		s.writeError(w, r, http.StatusInternalServerError, "failed to validate booking", err)
 		return
 	} else if badReq != "" {
@@ -463,15 +533,30 @@ func (s *Server) handleCreateBooking(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if blocked, err := s.checkNewCustomerRestriction(r.Context(), req.Email, req.StartTime, req.EndTime, settings); err != nil {
-		s.writeError(w, r, http.StatusInternalServerError, "failed to check booking restriction", err)
-		return
-	} else if blocked != "" {
-		s.writeError(w, r, http.StatusForbidden, blocked, nil)
-		return
+	if !linkMode {
+		if blocked, err := s.checkNewCustomerRestriction(r.Context(), req.Email, req.StartTime, req.EndTime, settings); err != nil {
+			s.writeError(w, r, http.StatusInternalServerError, "failed to check booking restriction", err)
+			return
+		} else if blocked != "" {
+			s.writeError(w, r, http.StatusForbidden, blocked, nil)
+			return
+		}
 	}
 
-	booking, err := s.queries.CreateBooking(r.Context(), req.Name, req.Email, req.Metadata, req.StartTime, req.EndTime, req.SetupIntentID, pmID, newUser)
+	params := db.CreateBookingParams{
+		Name:          req.Name,
+		Email:         req.Email,
+		Metadata:      req.Metadata,
+		Start:         req.StartTime,
+		End:           req.EndTime,
+		IsNewUser:     newUser,
+		ViaSecretLink: linkMode,
+	}
+	if !linkMode {
+		params.SetupIntentID = &req.SetupIntentID
+		params.PaymentMethodID = &pmID
+	}
+	booking, err := s.queries.CreateBooking(r.Context(), params)
 	if err != nil {
 		if isConflictError(err) {
 			s.writeError(w, r, http.StatusConflict, "this time slot is no longer available", err)
@@ -523,6 +608,7 @@ func (s *Server) sendBookingConfirmationEmails(booking *db.Booking, settings *db
 			CancelURL:    s.cfg.AppURL + "/cancel/" + booking.CancelToken.String(),
 			ViewURL:      s.cfg.AppURL + "/booking/" + booking.CancelToken.String(),
 			Timezone:     settings.Timezone,
+			FreeBooking:  booking.ViaSecretLink,
 		}
 		if err := s.email.SendConfirmation(booking.Email, data); err != nil {
 			s.logger.Error("send confirmation email failed", "booking_id", booking.ID, "email", booking.Email, "error", err)
@@ -551,6 +637,7 @@ func (s *Server) sendBookingConfirmationEmails(booking *db.Booking, settings *db
 			NewUserLabel:      newUserLabel,
 			AdminURL:          s.cfg.AppURL + "/admin/bookings",
 			Timezone:          settings.Timezone,
+			FreeStudioBooking: booking.ViaSecretLink,
 		}
 		for _, addr := range splitEmails(settings.NotificationEmails) {
 			if err := s.email.SendStaffNewBooking(addr, staffData); err != nil {
@@ -776,11 +863,11 @@ func windowCovers(windows []bookableWindow, start, end time.Time) bool {
 // availableDates returns the YYYY-MM-DD dates in the days-long window starting
 // at start (local midnight) that offer at least minHours of contiguous
 // bookable time, honouring closures, existing bookings, and minimum notice.
-// trainerHours selects the new-user gate's weekly schedule instead of the
-// normal bookable hours.
-func availableDates(settings *db.Settings, closures []*db.Closure, bookings []*db.Booking, start time.Time, days int, loc *time.Location, trainerHours bool) []string {
+// The gate's trainer schedule replaces normal hours when opts.trainerHours is
+// set; secret-link opts bypass lead time and optionally unlock all hours.
+func availableDates(settings *db.Settings, closures []*db.Closure, bookings []*db.Booking, start time.Time, days int, loc *time.Location, opts availabilityOpts) []string {
 	minHours := max(int(settings.MinHours), 1)
-	earliest := earliestBookableStart(settings)
+	earliest := earliestUnderOpts(settings, opts)
 
 	dates := make([]string, 0, days)
 	for i := 0; i < days; i++ {
@@ -788,13 +875,7 @@ func availableDates(settings *db.Settings, closures []*db.Closure, bookings []*d
 		if closed, _ := allDayClosureForDate(closures, day, loc); closed {
 			continue
 		}
-		var windows []bookableWindow
-		if trainerHours {
-			windows = newUserWindowsForDate(settings, day, loc)
-		} else {
-			windowStart, windowEnd := bookableBoundsForDate(day, settings, loc)
-			windows = []bookableWindow{{Start: windowStart, End: windowEnd}}
-		}
+		windows := windowsForDate(settings, day, loc, opts)
 		if dayHasBookableRun(windows, bookings, closures, earliest, minHours, loc) {
 			dates = append(dates, day.Format("2006-01-02"))
 		}
@@ -847,11 +928,18 @@ func earliestBookableStart(settings *db.Settings) time.Time {
 	return time.Now().Add(time.Duration(settings.MinLeadHours) * time.Hour)
 }
 
-func (s *Server) validateBookingCreate(ctx context.Context, start, end time.Time, settings *db.Settings, newUser bool) (badRequest string, err error) {
+// bookingValidationOpts carries the secret-link exceptions into booking
+// validation. Everything else (past start, durations, closures) still applies.
+type bookingValidationOpts struct {
+	bypassLeadTime bool // secret link: minimum-notice rule does not apply
+	anyHours       bool // secret link 24/7: bookable-hours window does not apply
+}
+
+func (s *Server) validateBookingCreate(ctx context.Context, start, end time.Time, settings *db.Settings, newUser bool, opts bookingValidationOpts) (badRequest string, err error) {
 	if start.Before(time.Now()) {
 		return "booking start time is in the past", nil
 	}
-	if start.Before(earliestBookableStart(settings)) {
+	if !opts.bypassLeadTime && start.Before(earliestBookableStart(settings)) {
 		unit := "hours"
 		if settings.MinLeadHours == 1 {
 			unit = "hour"
@@ -873,13 +961,16 @@ func (s *Server) validateBookingCreate(ctx context.Context, start, end time.Time
 	if dur > maxDur {
 		return "booking exceeds the maximum allowed duration", nil
 	}
-	if newUser {
+	switch {
+	case newUser:
 		// The gate replaces normal hours with the trainer's weekly schedule.
 		if !bookingWithinNewUserWindows(start, end, settings, loc) {
 			return "new customers can only book during trainer hours", nil
 		}
-	} else if !bookingWithinBookableHours(start, end, settings, loc) {
-		return "booking falls outside allowed hours", nil
+	case !opts.anyHours:
+		if !bookingWithinBookableHours(start, end, settings, loc) {
+			return "booking falls outside allowed hours", nil
+		}
 	}
 
 	startL := start.In(loc)
@@ -1043,5 +1134,6 @@ func bookingToAdmin(b *db.Booking) map[string]any {
 	m["charge_attempts"] = b.ChargeAttempts
 	m["last_charge_error"] = b.LastChargeError
 	m["is_new_user"] = b.IsNewUser
+	m["via_secret_link"] = b.ViaSecretLink
 	return m
 }

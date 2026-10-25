@@ -85,7 +85,7 @@ func TestValidateBookingCreate_newUserRejectedOutsideTrainerHours(t *testing.T) 
 		},
 	}
 	start := gateTestDate.Add(10 * time.Hour)
-	bad, err := s.validateBookingCreate(context.Background(), start, start.Add(2*time.Hour), settings, true)
+	bad, err := s.validateBookingCreate(context.Background(), start, start.Add(2*time.Hour), settings, true, bookingValidationOpts{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -157,8 +157,15 @@ func TestAvailability_newUserSeesTrainerSlots(t *testing.T) {
 	enableNewUserGate(t, ctx, q, "", []db.NewUserWindow{{Weekday: int(gateTestDate.Weekday()), Start: "18:00", End: "21:00"}})
 
 	// An existing (experienced) booking blocks the trainer slot for everyone.
-	if _, err := q.CreateBooking(ctx, "Pat", "pat@example.com", nil,
-		gateTestDate.Add(19*time.Hour), gateTestDate.Add(20*time.Hour), "si_gate_block", "pm_test_123", boolPtr(false)); err != nil {
+	if _, err := q.CreateBooking(ctx, db.CreateBookingParams{
+		Name:            "Pat",
+		Email:           "pat@example.com",
+		Start:           gateTestDate.Add(19 * time.Hour),
+		End:             gateTestDate.Add(20 * time.Hour),
+		SetupIntentID:   strptr("si_gate_block"),
+		PaymentMethodID: strptr("pm_test_123"),
+		IsNewUser:       boolPtr(false),
+	}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -495,31 +502,31 @@ func TestAvailableDates_trainerWindowsClosuresAndBookings(t *testing.T) {
 	tueStr := tue.Format("2006-01-02")
 
 	// Only the Tuesday has trainer hours.
-	dates := availableDates(settings, nil, nil, gateTestDate, 7, time.UTC, true)
+	dates := availableDates(settings, nil, nil, gateTestDate, 7, time.UTC, availabilityOpts{trainerHours: true})
 	if len(dates) != 1 || dates[0] != tueStr {
 		t.Fatalf("dates = %v, want [%s]", dates, tueStr)
 	}
 
 	// An all-day closure removes it.
 	closures := []*db.Closure{{AllDay: true, StartDate: tue, EndDate: tue.AddDate(0, 0, 1)}}
-	if dates := availableDates(settings, closures, nil, gateTestDate, 7, time.UTC, true); len(dates) != 0 {
+	if dates := availableDates(settings, closures, nil, gateTestDate, 7, time.UTC, availabilityOpts{trainerHours: true}); len(dates) != 0 {
 		t.Fatalf("dates with closure = %v, want none", dates)
 	}
 
 	// A 2-hour booking still leaves 3 contiguous hours, above the 2-hour minimum.
 	bookings := []*db.Booking{{StartTime: tue.Add(15 * time.Hour), EndTime: tue.Add(17 * time.Hour)}}
-	if dates := availableDates(settings, nil, bookings, gateTestDate, 7, time.UTC, true); len(dates) != 1 || dates[0] != tueStr {
+	if dates := availableDates(settings, nil, bookings, gateTestDate, 7, time.UTC, availabilityOpts{trainerHours: true}); len(dates) != 1 || dates[0] != tueStr {
 		t.Fatalf("dates with partial booking = %v, want [%s]", dates, tueStr)
 	}
 
 	// Booking all but one hour leaves no 2-hour run, so the day is dropped.
 	bookings = []*db.Booking{{StartTime: tue.Add(15 * time.Hour), EndTime: tue.Add(19 * time.Hour)}}
-	if dates := availableDates(settings, nil, bookings, gateTestDate, 7, time.UTC, true); len(dates) != 0 {
+	if dates := availableDates(settings, nil, bookings, gateTestDate, 7, time.UTC, availabilityOpts{trainerHours: true}); len(dates) != 0 {
 		t.Fatalf("dates with near-full booking = %v, want none", dates)
 	}
 
 	// Without the gate routing, normal hours apply to every day.
-	if dates := availableDates(settings, nil, nil, gateTestDate, 7, time.UTC, false); len(dates) != 7 {
+	if dates := availableDates(settings, nil, nil, gateTestDate, 7, time.UTC, availabilityOpts{}); len(dates) != 7 {
 		t.Fatalf("normal dates = %v, want all 7", dates)
 	}
 }
@@ -550,7 +557,7 @@ func TestAvailableDates_partialClosuresOnlyBlockTheirDates(t *testing.T) {
 					StartTime: &open,
 					EndTime:   &close,
 				}}
-				dates := availableDates(settings, closures, nil, gateTestDate, 4, time.UTC, trainerHours)
+				dates := availableDates(settings, closures, nil, gateTestDate, 4, time.UTC, availabilityOpts{trainerHours: trainerHours})
 				want := []string{gateTestDate.Format("2006-01-02")}
 				for offset := closureDays + 1; offset < 4; offset++ {
 					want = append(want, gateTestDate.AddDate(0, 0, offset).Format("2006-01-02"))
@@ -586,8 +593,15 @@ func TestAvailableDaysEndpoint_newUserOnlyTrainerDays(t *testing.T) {
 		return today.AddDate(0, 0, off)
 	}
 	thu := offset(time.Thursday, 7)
-	if _, err := q.CreateBooking(ctx, "Pat", "pat@example.com", nil,
-		thu.Add(15*time.Hour), thu.Add(20*time.Hour), "si_days_full", "pm_test_123", boolPtr(true)); err != nil {
+	if _, err := q.CreateBooking(ctx, db.CreateBookingParams{
+		Name:            "Pat",
+		Email:           "pat@example.com",
+		Start:           thu.Add(15 * time.Hour),
+		End:             thu.Add(20 * time.Hour),
+		SetupIntentID:   strptr("si_days_full"),
+		PaymentMethodID: strptr("pm_test_123"),
+		IsNewUser:       boolPtr(true),
+	}); err != nil {
 		t.Fatal(err)
 	}
 

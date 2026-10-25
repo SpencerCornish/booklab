@@ -219,7 +219,7 @@ func TestAdminChargeBooking_idempotencyKeyAcrossRetries(t *testing.T) {
 			t.Cleanup(ts.Close)
 
 			start := time.Date(2031, 3, 1+i, 12, 0, 0, 0, time.UTC)
-			b, err := q.CreateBooking(ctx, "Pat", "pat@example.com", nil, start, start.Add(2*time.Hour), "si_"+tc.name, "pm_test_123", nil)
+			b, err := q.CreateBooking(ctx, db.CreateBookingParams{Name: "Pat", Email: "pat@example.com", Start: start, End: start.Add(2 * time.Hour), SetupIntentID: strptr("si_" + tc.name), PaymentMethodID: strptr("pm_test_123")})
 			if err != nil {
 				t.Fatal(err)
 			}

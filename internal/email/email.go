@@ -65,6 +65,9 @@ type ConfirmationData struct {
 	CancelURL    string
 	ViewURL      string
 	Timezone     string
+	// FreeBooking marks a secret-link (studio artist) booking: the payment
+	// wording is replaced with "no payment required".
+	FreeBooking bool
 }
 
 type ReminderData struct {
@@ -106,6 +109,9 @@ type StaffNewBookingData struct {
 	NewUserLabel      string // e.g. "New user (self-reported)"; empty when the gate is off
 	AdminURL          string
 	Timezone          string
+	// FreeStudioBooking tags secret-link bookings in the staff email so staff
+	// can tell artist blocks from external paid bookings at a glance.
+	FreeStudioBooking bool
 }
 
 type StaffCancellationData struct {

@@ -119,10 +119,11 @@ func (q *Queries) UpdateSettings(ctx context.Context, p UpdateSettingsParams) (*
 // SetSecretLinkToken stores a freshly generated (or rotated) link token. It is
 // only called by the admin rotate endpoint and the enable-time bootstrap, never
 // with arbitrary client input, so the previous token is unconditionally
-// replaced: rotation revokes the old link immediately.
+// replaced: rotation revokes the old link immediately. An empty argument
+// clears the token (NULL), which invalidates the link on its own.
 func (q *Queries) SetSecretLinkToken(ctx context.Context, token string) (*Settings, error) {
 	row := q.pool.QueryRow(ctx, `
-		UPDATE settings SET secret_link_token = $1 WHERE id = 1
+		UPDATE settings SET secret_link_token = NULLIF($1, '') WHERE id = 1
 		RETURNING id, resource_name, hourly_rate_cents, currency, timezone,
 			bookable_start, bookable_end, min_hours, max_hours, reminder_hours_before,
 			notification_emails, auto_charge_delay_minutes, referral_sources,

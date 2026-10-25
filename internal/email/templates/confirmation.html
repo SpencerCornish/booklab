@@ -12,8 +12,8 @@
   </div>
 
   <p style="color:#555;font-size:14px;">
-    Payment will be collected <em>after</em> your session based on actual hours used.
-    A card has been saved on file - you won't be charged until an admin processes your session.
+    {{if .FreeBooking}}Studio booking - no payment required.{{else}}Payment will be collected <em>after</em> your session based on actual hours used.
+    A card has been saved on file - you won't be charged until an admin processes your session.{{end}}
   </p>
 
   <div style="margin:24px 0;">

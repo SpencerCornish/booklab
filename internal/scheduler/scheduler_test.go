@@ -18,6 +18,8 @@ func testDSN() string {
 	return os.Getenv("TEST_DATABASE_URL")
 }
 
+func strptr(s string) *string { return &s }
+
 func resetSettingsUTC(t *testing.T, ctx context.Context, q *db.Queries) {
 	t.Helper()
 	tz := "UTC"
@@ -61,7 +63,7 @@ func TestAutoCharge_completed_concurrentOnlyOneCharge(t *testing.T) {
 
 	start := time.Date(2032, 4, 1, 12, 0, 0, 0, time.UTC)
 	end := start.Add(2 * time.Hour)
-	b, err := q.CreateBooking(ctx, "Sam", "sam@example.com", nil, start, end, "si_sched", "pm_sched_1", nil)
+	b, err := q.CreateBooking(ctx, db.CreateBookingParams{Name: "Sam", Email: "sam@example.com", Start: start, End: end, SetupIntentID: strptr("si_sched"), PaymentMethodID: strptr("pm_sched_1")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,7 +126,7 @@ func TestAutoCharge_unknownOutcomeRetryReusesKey(t *testing.T) {
 	resetSettingsUTC(t, ctx, q)
 
 	start := time.Date(2032, 4, 1, 12, 0, 0, 0, time.UTC)
-	b, err := q.CreateBooking(ctx, "Sam", "sam@example.com", nil, start, start.Add(2*time.Hour), "si_sched_retry", "pm_sched_2", nil)
+	b, err := q.CreateBooking(ctx, db.CreateBookingParams{Name: "Sam", Email: "sam@example.com", Start: start, End: start.Add(2 * time.Hour), SetupIntentID: strptr("si_sched_retry"), PaymentMethodID: strptr("pm_sched_2")})
 	if err != nil {
 		t.Fatal(err)
 	}

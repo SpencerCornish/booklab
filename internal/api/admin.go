@@ -364,7 +364,10 @@ func (s *Server) handleAdminUpdateBooking(w http.ResponseWriter, r *http.Request
 				s.writeError(w, r, http.StatusInternalServerError, "failed to load booking", gerr)
 				return
 			}
-			if existing.StripePaymentMethodID == nil || *existing.StripePaymentMethodID == "" {
+			// Free secret-link bookings have no payment method by design;
+			// only paid bookings require one on file before completing.
+			if !existing.ViaSecretLink &&
+				(existing.StripePaymentMethodID == nil || *existing.StripePaymentMethodID == "") {
 				s.writeError(w, r, http.StatusBadRequest, "cannot mark booking completed without a payment method on file", nil)
 				return
 			}
@@ -435,6 +438,23 @@ func (s *Server) handleAdminChargeBooking(w http.ResponseWriter, r *http.Request
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&req); err != nil && !errors.Is(err, io.EOF) {
 		s.writeError(w, r, http.StatusBadRequest, "invalid request body", err)
+		return
+	}
+
+	// Free bookings (secret link, or any booking with no payment method) have
+	// nothing to charge: reject before claiming so the row is never left in
+	// the charging state, and before any pointer dereference that would panic.
+	existing, err := s.queries.GetBookingByID(r.Context(), id)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			s.writeError(w, r, http.StatusNotFound, "booking not found", err)
+			return
+		}
+		s.writeError(w, r, http.StatusInternalServerError, "failed to load booking", err)
+		return
+	}
+	if existing.ViaSecretLink || existing.StripePaymentMethodID == nil {
+		s.writeError(w, r, http.StatusBadRequest, "free studio booking cannot be charged", nil)
 		return
 	}
 
@@ -553,7 +573,7 @@ func (s *Server) handleAdminGetSettings(w http.ResponseWriter, r *http.Request) 
 		s.writeError(w, r, http.StatusInternalServerError, "failed to load settings", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, settingsToMap(settings))
+	writeJSON(w, http.StatusOK, settingsToMap(settings, s.cfg.AppURL))
 }
 
 func (s *Server) handleAdminUpdateSettings(w http.ResponseWriter, r *http.Request) {
@@ -576,6 +596,7 @@ func (s *Server) handleAdminUpdateSettings(w http.ResponseWriter, r *http.Reques
 		// Raw so an absent field (leave unchanged) can be told apart from null (clear the window).
 		NewCustomerRestriction json.RawMessage   `json:"new_customer_restriction"`
 		NewUserGate            *adminNewUserGate `json:"new_user_gate"`
+		SecretLink             *adminSecretLink  `json:"secret_link"`
 	}
 	if !s.readJSONRequest(w, r, &req) {
 		return
@@ -642,13 +663,33 @@ func (s *Server) handleAdminUpdateSettings(w http.ResponseWriter, r *http.Reques
 		params.NewUserGateQuestion = &question
 		params.NewUserGateSchedule = &schedule
 	}
+	if req.SecretLink != nil {
+		params.SecretLinkEnabled = &req.SecretLink.Enabled
+		params.SecretLinkAnyHours = &req.SecretLink.AllowOutsideHours
+	}
 
 	settings, err := s.queries.UpdateSettings(r.Context(), params)
 	if err != nil {
 		s.writeError(w, r, http.StatusInternalServerError, "failed to update settings", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, settingsToMap(settings))
+
+	// Enabling the link with no token issued yet bootstraps one, so the
+	// settings response always carries a working URL once enabled. Rotations
+	// stay explicit via /admin/secret-link/rotate.
+	if settings.SecretLinkEnabled && (settings.SecretLinkToken == nil || *settings.SecretLinkToken == "") {
+		token, err := generateSecretLinkToken()
+		if err != nil {
+			s.writeError(w, r, http.StatusInternalServerError, "failed to generate token", err)
+			return
+		}
+		settings, err = s.queries.SetSecretLinkToken(r.Context(), token)
+		if err != nil {
+			s.writeError(w, r, http.StatusInternalServerError, "failed to save token", err)
+			return
+		}
+	}
+	writeJSON(w, http.StatusOK, settingsToMap(settings, s.cfg.AppURL))
 }
 
 func (s *Server) handleAdminListClosures(w http.ResponseWriter, r *http.Request) {
@@ -755,7 +796,7 @@ func parseID(r *http.Request) (int32, error) {
 	return int32(id), err
 }
 
-func settingsToMap(s *db.Settings) map[string]any {
+func settingsToMap(s *db.Settings, appURL string) map[string]any {
 	return map[string]any{
 		"resource_name":             s.ResourceName,
 		"hourly_rate_cents":         s.HourlyRateCents,
@@ -774,7 +815,24 @@ func settingsToMap(s *db.Settings) map[string]any {
 		"privacy_content":           s.PrivacyContent,
 		"new_customer_restriction":  newCustomerRestrictionToMap(s),
 		"new_user_gate":             newUserGateToMap(s),
+		"secret_link":               secretLinkToMap(s, appURL),
 	}
+}
+
+// secretLinkToMap returns the admin-only secret-link state. It must never be
+// included in the public settings payload — the link's existence is private.
+func secretLinkToMap(s *db.Settings, appURL string) map[string]any {
+	m := map[string]any{
+		"enabled":             s.SecretLinkEnabled,
+		"allow_outside_hours": s.SecretLinkAnyHours,
+		"token":               nil,
+		"url":                 nil,
+	}
+	if s.SecretLinkToken != nil && *s.SecretLinkToken != "" {
+		m["token"] = *s.SecretLinkToken
+		m["url"] = appURL + secretLinkURLPath + *s.SecretLinkToken
+	}
+	return m
 }
 
 // newUserGateToMap returns the gate settings, always including the schedule as
@@ -796,6 +854,14 @@ type adminNewUserGate struct {
 	Enabled  bool               `json:"enabled"`
 	Question string             `json:"question"`
 	Schedule []db.NewUserWindow `json:"schedule"`
+}
+
+// adminSecretLink is the settings payload for the secret booking link. The
+// token itself is never accepted here — it is issued by the rotate endpoint
+// (and bootstrapped on first enable) so client input cannot choose it.
+type adminSecretLink struct {
+	Enabled           bool `json:"enabled"`
+	AllowOutsideHours bool `json:"allow_outside_hours"`
 }
 
 // parseNewUserGateSchedule validates the weekly trainer schedule: weekdays
