@@ -21,3 +21,9 @@ internal/webembed/dist/*
 !internal/webembed/dist/placeholder.txt
 *.exe
 booklab
+
+# Functional test artifacts
+.functest/
+test-results/
+tests/e2e/node_modules/
+tests/e2e/playwright-report/
