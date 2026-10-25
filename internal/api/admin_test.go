@@ -49,7 +49,7 @@ func TestAdminChargeBooking_idempotentSecondRequest(t *testing.T) {
 	// Completed booking eligible for charge
 	start := time.Date(2031, 3, 1, 12, 0, 0, 0, time.UTC)
 	end := start.Add(2 * time.Hour)
-	b, err := q.CreateBooking(ctx, "Pat", "pat@example.com", nil, start, end, "si_x", "pm_test_123")
+	b, err := q.CreateBooking(ctx, "Pat", "pat@example.com", nil, start, end, "si_x", "pm_test_123", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -337,7 +337,7 @@ func TestAdminUpdateBooking_rejectsCompletedWithoutPaymentMethod(t *testing.T) {
 
 	start := time.Date(2031, 4, 1, 12, 0, 0, 0, time.UTC)
 	end := start.Add(2 * time.Hour)
-	b, err := q.CreateBooking(ctx, "Pat", "pat@example.com", nil, start, end, "si_orphan", "")
+	b, err := q.CreateBooking(ctx, "Pat", "pat@example.com", nil, start, end, "si_orphan", "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

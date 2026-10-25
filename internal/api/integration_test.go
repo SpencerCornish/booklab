@@ -54,14 +54,20 @@ func resetSettingsUTC(t *testing.T, ctx context.Context, q *db.Queries) {
 	maxH := int32(8)
 	hr := int32(1000)
 	cur := "usd"
+	gateEnabled := false
+	gateSchedule := []db.NewUserWindow{}
+	gateQuestion := "Have you used this space before?"
 	_, err := q.UpdateSettings(ctx, db.UpdateSettingsParams{
-		Timezone:        &tz,
-		BookableStart:   &bs,
-		BookableEnd:     &be,
-		MinHours:        &minH,
-		MaxHours:        &maxH,
-		HourlyRateCents: &hr,
-		Currency:        &cur,
+		Timezone:            &tz,
+		BookableStart:       &bs,
+		BookableEnd:         &be,
+		MinHours:            &minH,
+		MaxHours:            &maxH,
+		HourlyRateCents:     &hr,
+		Currency:            &cur,
+		NewUserGateEnabled:  &gateEnabled,
+		NewUserGateQuestion: &gateQuestion,
+		NewUserGateSchedule: &gateSchedule,
 	})
 	if err != nil {
 		t.Fatalf("reset settings: %v", err)

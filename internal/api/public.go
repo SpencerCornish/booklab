@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -32,6 +34,15 @@ func (s *Server) handleGetPublicSettings(w http.ResponseWriter, r *http.Request)
 		}
 	}
 
+	// Only advertise the question; the trainer schedule stays server-side.
+	var gate any
+	if settings.NewUserGateEnabled {
+		gate = map[string]any{
+			"enabled":  true,
+			"question": newUserGateQuestion(settings),
+		}
+	}
+
 	writeJSON(w, http.StatusOK, map[string]any{
 		"resource_name":            settings.ResourceName,
 		"hourly_rate_cents":        settings.HourlyRateCents,
@@ -44,6 +55,7 @@ func (s *Server) handleGetPublicSettings(w http.ResponseWriter, r *http.Request)
 		"timezone":                 settings.Timezone,
 		"referral_sources":         settings.ReferralSources,
 		"new_customer_restriction": restriction,
+		"new_user_gate":            gate,
 	})
 }
 
@@ -110,17 +122,41 @@ func (s *Server) handleGetAvailability(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Build slot list based on bookable hours
-	startHour := settings.BookableStart.Hour()
-	startMin := settings.BookableStart.Minute()
-	endHour := settings.BookableEnd.Hour()
-	endMin := settings.BookableEnd.Minute()
+	// The gate replaces normal hours with the trainer's weekly schedule for
+	// self-reported new customers.
+	newUser, parseErr := newUserQueryParam(r)
+	if parseErr != nil {
+		s.writeError(w, r, http.StatusBadRequest, "invalid new_user value", parseErr)
+		return
+	}
 
-	dayStart := time.Date(date.Year(), date.Month(), date.Day(), startHour, startMin, 0, 0, loc)
-	dayEnd := time.Date(date.Year(), date.Month(), date.Day(), endHour, endMin, 0, 0, loc)
+	var windows []bookableWindow
+	if settings.NewUserGateEnabled && newUser {
+		windows = newUserWindowsForDate(settings, date, loc)
+	} else {
+		start, end := bookableBoundsForDate(date, settings, loc)
+		windows = []bookableWindow{{Start: start, End: end}}
+	}
+	if len(windows) == 0 {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"date":      dateStr,
+			"is_closed": false,
+			"slots":     []any{},
+		})
+		return
+	}
 
-	// Get existing bookings for this day
-	bookings, err := s.queries.ListBookingsInRange(r.Context(), dayStart, dayEnd.Add(time.Hour))
+	// Fetch every booking that could overlap any window on this date.
+	fetchStart, fetchEnd := windows[0].Start, windows[0].End
+	for _, w := range windows[1:] {
+		if w.Start.Before(fetchStart) {
+			fetchStart = w.Start
+		}
+		if w.End.After(fetchEnd) {
+			fetchEnd = w.End
+		}
+	}
+	bookings, err := s.queries.ListBookingsOverlapping(r.Context(), fetchStart, fetchEnd)
 	if err != nil {
 		s.writeError(w, r, http.StatusInternalServerError, "failed to load bookings", err)
 		return
@@ -133,29 +169,34 @@ func (s *Server) handleGetAvailability(w http.ResponseWriter, r *http.Request) {
 	}
 
 	earliest := earliestBookableStart(settings)
-	var slots []slot
-	for t := dayStart; t.Before(dayEnd); t = t.Add(time.Hour) {
-		slotEnd := t.Add(time.Hour)
-		available := true
-		for _, b := range bookings {
-			// Overlap check: slot overlaps booking if slot.start < b.end && slot.end > b.start
-			if t.Before(b.EndTime) && slotEnd.After(b.StartTime) {
-				available = false
-				break
+	slots := make([]slot, 0)
+	for _, w := range windows {
+		for t := w.Start; !t.Add(time.Hour).After(w.End); t = t.Add(time.Hour) {
+			slotEnd := t.Add(time.Hour)
+			available := true
+			for _, b := range bookings {
+				// Overlap check: slot overlaps booking if slot.start < b.end && slot.end > b.start
+				if t.Before(b.EndTime) && slotEnd.After(b.StartTime) {
+					available = false
+					break
+				}
 			}
-		}
-		for _, c := range closures {
-			if slotOverlapsPartialClosure(t, slotEnd, c, loc) {
-				available = false
-				break
+			if available {
+				for _, c := range closures {
+					if slotOverlapsPartialClosure(t, slotEnd, c, loc) {
+						available = false
+						break
+					}
+				}
 			}
+			// Past slots, and slots inside the minimum notice period, are not available
+			if t.Before(earliest) {
+				available = false
+			}
+			slots = append(slots, slot{Start: t, End: slotEnd, Available: available})
 		}
-		// Past slots, and slots inside the minimum notice period, are not available
-		if t.Before(earliest) {
-			available = false
-		}
-		slots = append(slots, slot{Start: t, End: slotEnd, Available: available})
 	}
+	sort.Slice(slots, func(i, j int) bool { return slots[i].Start.Before(slots[j].Start) })
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"date":      dateStr,
@@ -164,11 +205,63 @@ func (s *Server) handleGetAvailability(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// handleGetAvailableDays lists the dates in the coming days that have at least
+// one bookable slot, so the booking page can grey out dead days up front
+// instead of making visitors click through empty dates.
+func (s *Server) handleGetAvailableDays(w http.ResponseWriter, r *http.Request) {
+	days := 60
+	if raw := r.URL.Query().Get("days"); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 1 {
+			s.writeError(w, r, http.StatusBadRequest, "invalid days value", nil)
+			return
+		}
+		days = min(parsed, 90)
+	}
+
+	settings, err := s.queries.GetSettings(r.Context())
+	if err != nil {
+		s.writeError(w, r, http.StatusInternalServerError, "failed to load settings", err)
+		return
+	}
+	loc := settingsLocation(settings)
+
+	newUser, err := newUserQueryParam(r)
+	if err != nil {
+		s.writeError(w, r, http.StatusBadRequest, "invalid new_user value", err)
+		return
+	}
+
+	now := time.Now().In(loc)
+	start := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
+	end := start.AddDate(0, 0, days)
+
+	closures, err := s.queries.ListClosuresInRange(r.Context(), start, end)
+	if err != nil {
+		s.writeError(w, r, http.StatusInternalServerError, "failed to load closures", err)
+		return
+	}
+	bookings, err := s.queries.ListBookingsOverlapping(r.Context(), start, end)
+	if err != nil {
+		s.writeError(w, r, http.StatusInternalServerError, "failed to load bookings", err)
+		return
+	}
+
+	// Same routing rule as the per-date endpoint: trainer hours replace normal
+	// hours only while the gate is enabled and the customer is self-reported new.
+	trainerHours := settings.NewUserGateEnabled && newUser
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"available_dates": availableDates(settings, closures, bookings, start, days, loc, trainerHours),
+	})
+}
+
 func (s *Server) handlePrepareBooking(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Email     string    `json:"email"`
 		StartTime time.Time `json:"start_time"`
 		EndTime   time.Time `json:"end_time"`
+		NewUser   *bool     `json:"new_user"`
 	}
 	if !s.readJSONRequest(w, r, &req) {
 		return
@@ -188,7 +281,13 @@ func (s *Server) handlePrepareBooking(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if badReq, err := s.validateBookingCreate(r.Context(), req.StartTime, req.EndTime, settings); err != nil {
+	newUser, badReq := resolveNewUserAnswer(settings, req.NewUser)
+	if badReq != "" {
+		s.writeError(w, r, http.StatusBadRequest, badReq, nil)
+		return
+	}
+
+	if badReq, err := s.validateBookingCreate(r.Context(), req.StartTime, req.EndTime, settings, newUser != nil && *newUser); err != nil {
 		s.writeError(w, r, http.StatusInternalServerError, "failed to validate booking", err)
 		return
 	} else if badReq != "" {
@@ -233,6 +332,7 @@ func (s *Server) handleCreateBooking(w http.ResponseWriter, r *http.Request) {
 		Metadata      map[string]string `json:"metadata"`
 		StartTime     time.Time         `json:"start_time"`
 		EndTime       time.Time         `json:"end_time"`
+		NewUser       *bool             `json:"new_user"`
 	}
 	if !s.readJSONRequest(w, r, &req) {
 		return
@@ -271,7 +371,13 @@ func (s *Server) handleCreateBooking(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if badReq, err := s.validateBookingCreate(r.Context(), req.StartTime, req.EndTime, settings); err != nil {
+	newUser, badReq := resolveNewUserAnswer(settings, req.NewUser)
+	if badReq != "" {
+		s.writeError(w, r, http.StatusBadRequest, badReq, nil)
+		return
+	}
+
+	if badReq, err := s.validateBookingCreate(r.Context(), req.StartTime, req.EndTime, settings, newUser != nil && *newUser); err != nil {
 		s.writeError(w, r, http.StatusInternalServerError, "failed to validate booking", err)
 		return
 	} else if badReq != "" {
@@ -287,7 +393,7 @@ func (s *Server) handleCreateBooking(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	booking, err := s.queries.CreateBooking(r.Context(), req.Name, req.Email, req.Metadata, req.StartTime, req.EndTime, req.SetupIntentID, pmID)
+	booking, err := s.queries.CreateBooking(r.Context(), req.Name, req.Email, req.Metadata, req.StartTime, req.EndTime, req.SetupIntentID, pmID, newUser)
 	if err != nil {
 		if isConflictError(err) {
 			s.writeError(w, r, http.StatusConflict, "this time slot is no longer available", err)
@@ -347,6 +453,14 @@ func (s *Server) sendBookingConfirmationEmails(booking *db.Booking, settings *db
 			return
 		}
 		priorCount, _ := s.queries.CountPriorBookings(context.Background(), booking.Email, booking.ID)
+		newUserLabel := ""
+		if booking.IsNewUser != nil {
+			if *booking.IsNewUser {
+				newUserLabel = "New user (self-reported)"
+			} else {
+				newUserLabel = "Returning customer (self-reported)"
+			}
+		}
 		staffData := emailsvc.StaffNewBookingData{
 			ResourceName:      settings.ResourceName,
 			BookerName:        booking.Name,
@@ -356,6 +470,7 @@ func (s *Server) sendBookingConfirmationEmails(booking *db.Booking, settings *db
 			EndTime:           booking.EndTime,
 			IsReturnCustomer:  priorCount > 0,
 			PriorBookingCount: priorCount,
+			NewUserLabel:      newUserLabel,
 			AdminURL:          s.cfg.AppURL + "/admin/bookings",
 			Timezone:          settings.Timezone,
 		}
@@ -484,13 +599,177 @@ func bookingWithinBookableHours(start, end time.Time, st *db.Settings, loc *time
 	return true
 }
 
+// bookableWindow is one contiguous range of bookable time on a single day.
+type bookableWindow struct {
+	Start time.Time
+	End   time.Time
+}
+
+// parseClock parses an HH:MM clock value.
+func parseClock(v string) (time.Time, bool) {
+	t, err := time.Parse("15:04", v)
+	if err != nil {
+		return time.Time{}, false
+	}
+	return t, true
+}
+
+// newUserWindowsForDate returns the merged trainer windows for the date's
+// weekday, expressed in loc. Entries with invalid or inverted times are
+// skipped rather than blocking availability.
+func newUserWindowsForDate(settings *db.Settings, date time.Time, loc *time.Location) []bookableWindow {
+	d := date.In(loc)
+	y, m, day := d.Date()
+	weekday := int(d.Weekday())
+
+	var windows []bookableWindow
+	for _, w := range settings.NewUserGateSchedule {
+		if w.Weekday != weekday {
+			continue
+		}
+		start, okStart := parseClock(w.Start)
+		end, okEnd := parseClock(w.End)
+		if !okStart || !okEnd || !end.After(start) {
+			continue
+		}
+		windows = append(windows, bookableWindow{
+			Start: time.Date(y, m, day, start.Hour(), start.Minute(), 0, 0, loc),
+			End:   time.Date(y, m, day, end.Hour(), end.Minute(), 0, 0, loc),
+		})
+	}
+	return mergeBookableWindows(windows)
+}
+
+// mergeBookableWindows sorts windows by start and merges overlapping or
+// adjacent ones so selections can span window boundaries.
+func mergeBookableWindows(windows []bookableWindow) []bookableWindow {
+	if len(windows) == 0 {
+		return nil
+	}
+	sort.Slice(windows, func(i, j int) bool { return windows[i].Start.Before(windows[j].Start) })
+	merged := []bookableWindow{windows[0]}
+	for _, w := range windows[1:] {
+		last := &merged[len(merged)-1]
+		if !w.Start.After(last.End) {
+			if w.End.After(last.End) {
+				last.End = w.End
+			}
+			continue
+		}
+		merged = append(merged, w)
+	}
+	return merged
+}
+
+// bookingWithinNewUserWindows reports whether [start, end) is covered by the
+// trainer windows on every local calendar day the interval touches.
+func bookingWithinNewUserWindows(start, end time.Time, settings *db.Settings, loc *time.Location) bool {
+	start = start.In(loc)
+	end = end.In(loc)
+	if !end.After(start) {
+		return false
+	}
+	for cur := start; cur.Before(end); {
+		y, m, d := cur.Date()
+		day := time.Date(y, m, d, 0, 0, 0, 0, loc)
+		nextMidnight := day.AddDate(0, 0, 1)
+		segEnd := end
+		if segEnd.After(nextMidnight) {
+			segEnd = nextMidnight
+		}
+		if !windowCovers(newUserWindowsForDate(settings, day, loc), cur, segEnd) {
+			return false
+		}
+		cur = nextMidnight
+	}
+	return true
+}
+
+// windowCovers reports whether some window fully contains [start, end).
+func windowCovers(windows []bookableWindow, start, end time.Time) bool {
+	for _, w := range windows {
+		if !start.Before(w.Start) && !end.After(w.End) {
+			return true
+		}
+	}
+	return false
+}
+
+// availableDates returns the YYYY-MM-DD dates in the days-long window starting
+// at start (local midnight) that offer at least minHours of contiguous
+// bookable time, honouring closures, existing bookings, and minimum notice.
+// trainerHours selects the new-user gate's weekly schedule instead of the
+// normal bookable hours.
+func availableDates(settings *db.Settings, closures []*db.Closure, bookings []*db.Booking, start time.Time, days int, loc *time.Location, trainerHours bool) []string {
+	minHours := max(int(settings.MinHours), 1)
+	earliest := earliestBookableStart(settings)
+
+	dates := make([]string, 0, days)
+	for i := 0; i < days; i++ {
+		day := start.AddDate(0, 0, i)
+		if closed, _ := allDayClosureForDate(closures, day, loc); closed {
+			continue
+		}
+		var windows []bookableWindow
+		if trainerHours {
+			windows = newUserWindowsForDate(settings, day, loc)
+		} else {
+			windowStart, windowEnd := bookableBoundsForDate(day, settings, loc)
+			windows = []bookableWindow{{Start: windowStart, End: windowEnd}}
+		}
+		if dayHasBookableRun(windows, bookings, closures, earliest, minHours, loc) {
+			dates = append(dates, day.Format("2006-01-02"))
+		}
+	}
+	return dates
+}
+
+// dayHasBookableRun reports whether any window contains minHours consecutive
+// available hourly slots. Runs break at window gaps, matching the picker's
+// contiguity rule, so a day only counts when a valid selection exists.
+func dayHasBookableRun(windows []bookableWindow, bookings []*db.Booking, closures []*db.Closure, earliest time.Time, minHours int, loc *time.Location) bool {
+	for _, w := range windows {
+		run := 0
+		for t := w.Start; !t.Add(time.Hour).After(w.End); t = t.Add(time.Hour) {
+			slotEnd := t.Add(time.Hour)
+			available := !t.Before(earliest)
+			if available {
+				for _, b := range bookings {
+					// Overlap check: slot overlaps booking if slot.start < b.end && slot.end > b.start
+					if t.Before(b.EndTime) && slotEnd.After(b.StartTime) {
+						available = false
+						break
+					}
+				}
+			}
+			if available {
+				for _, c := range closures {
+					if slotOverlapsPartialClosure(t, slotEnd, c, loc) {
+						available = false
+						break
+					}
+				}
+			}
+			if available {
+				run++
+				if run >= minHours {
+					return true
+				}
+			} else {
+				run = 0
+			}
+		}
+	}
+	return false
+}
+
 // earliestBookableStart is the earliest start time a new booking may have,
 // given the minimum notice period in settings.
 func earliestBookableStart(settings *db.Settings) time.Time {
 	return time.Now().Add(time.Duration(settings.MinLeadHours) * time.Hour)
 }
 
-func (s *Server) validateBookingCreate(ctx context.Context, start, end time.Time, settings *db.Settings) (badRequest string, err error) {
+func (s *Server) validateBookingCreate(ctx context.Context, start, end time.Time, settings *db.Settings, newUser bool) (badRequest string, err error) {
 	if start.Before(time.Now()) {
 		return "booking start time is in the past", nil
 	}
@@ -516,7 +795,12 @@ func (s *Server) validateBookingCreate(ctx context.Context, start, end time.Time
 	if dur > maxDur {
 		return "booking exceeds the maximum allowed duration", nil
 	}
-	if !bookingWithinBookableHours(start, end, settings, loc) {
+	if newUser {
+		// The gate replaces normal hours with the trainer's weekly schedule.
+		if !bookingWithinNewUserWindows(start, end, settings, loc) {
+			return "new customers can only book during trainer hours", nil
+		}
+	} else if !bookingWithinBookableHours(start, end, settings, loc) {
 		return "booking falls outside allowed hours", nil
 	}
 
@@ -544,6 +828,40 @@ func settingsLocation(settings *db.Settings) *time.Location {
 		return time.UTC
 	}
 	return loc
+}
+
+// newUserQueryParam parses the optional new_user query parameter (absent = false).
+func newUserQueryParam(r *http.Request) (bool, error) {
+	raw := r.URL.Query().Get("new_user")
+	if raw == "" {
+		return false, nil
+	}
+	return strconv.ParseBool(raw)
+}
+
+// defaultNewUserGateQuestion is used when the admin enables the gate without
+// writing their own question text.
+const defaultNewUserGateQuestion = "Have you used this space before?"
+
+// newUserGateQuestion returns the admin's question, or the default when blank.
+func newUserGateQuestion(settings *db.Settings) string {
+	if strings.TrimSpace(settings.NewUserGateQuestion) != "" {
+		return settings.NewUserGateQuestion
+	}
+	return defaultNewUserGateQuestion
+}
+
+// resolveNewUserAnswer validates the self-reported answer against the gate
+// settings. It returns nil when the gate is disabled (nothing is stored), and
+// a bad-request message when the gate is enabled but no answer was sent.
+func resolveNewUserAnswer(settings *db.Settings, answer *bool) (*bool, string) {
+	if !settings.NewUserGateEnabled {
+		return nil, ""
+	}
+	if answer == nil {
+		return nil, "please answer the pre-booking question"
+	}
+	return answer, ""
 }
 
 // newCustomerWindow returns the new-customer restriction as the half-open interval
@@ -646,5 +964,6 @@ func bookingToAdmin(b *db.Booking) map[string]any {
 	m["updated_at"] = b.UpdatedAt
 	m["charge_attempts"] = b.ChargeAttempts
 	m["last_charge_error"] = b.LastChargeError
+	m["is_new_user"] = b.IsNewUser
 	return m
 }
