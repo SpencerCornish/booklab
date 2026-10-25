@@ -9,8 +9,8 @@ runs:
     - name: Install libxml2 (hurl links against it)
       shell: bash
       run: |
-        sudo apt-get update -qq
-        sudo apt-get install -y -qq libxml2
+        sudo apt-get update
+        sudo apt-get install -y libxml2
 
     - name: Install hurl
       shell: bash

@@ -76,7 +76,9 @@ jobs:
 
   functional-api:
     name: Functional API (Hurl)
-    runs-on: ubuntu-latest
+    # Pinned: hurl's release build links libxml2.so.2 dynamically, and the
+    # package name differs on newer runner images (ubuntu-latest → 26.x).
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 
@@ -162,7 +164,8 @@ jobs:
 
   docker-smoke:
     name: Docker smoke (prod compose)
-    runs-on: ubuntu-latest
+    # Same reasoning as functional-api (hurl install).
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 
