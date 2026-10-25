@@ -4,7 +4,6 @@ import (
 	"context"
 	"log/slog"
 	"os"
-	"sync"
 	"testing"
 	"time"
 
@@ -74,33 +73,5 @@ func resetSettingsUTC(t *testing.T, ctx context.Context, q *db.Queries) {
 	}
 }
 
-// mockStripe implements stripe.Client for tests; counts ChargePaymentMethod calls.
-type mockStripe struct {
-	mu          sync.Mutex
-	chargeCalls int
-}
-
-func (m *mockStripe) CreateSetupIntent(email string) (string, string, error) {
-	return "si_test_mock", "seti_secret_mock", nil
-}
-
-func (m *mockStripe) GetPaymentMethodFromSetupIntent(setupIntentID string) (string, error) {
-	return "pm_test_mock", nil
-}
-
-func (m *mockStripe) ChargePaymentMethod(pmID string, amountCents int64, currency, description, idempotencyKey string) (string, string, error) {
-	m.mu.Lock()
-	m.chargeCalls++
-	m.mu.Unlock()
-	return "pi_test_mock", "https://stripe.test/receipt", nil
-}
-
-func (m *mockStripe) DetachPaymentMethod(pmID string) error {
-	return nil
-}
-
-func (m *mockStripe) chargeCount() int {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.chargeCalls
-}
+// The Stripe test double lives in internal/stripe/stripetest and is shared by
+// every suite (api, scheduler, and the functional tests via STRIPE_FAKE=1).

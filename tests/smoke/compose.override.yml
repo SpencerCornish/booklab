@@ -1,0 +1,8 @@
+# Local-Podman/SELinux helper for the smoke test: disables volume labeling so
+# the POSTGRES_DATA_PATH bind mount works under rootless podman on enforcing
+# hosts. A no-op under Docker on GitHub Actions runners.
+services:
+  db:
+    security_opt: ["label=disable"]
+  booklab:
+    security_opt: ["label=disable"]

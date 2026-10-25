@@ -464,7 +464,7 @@ func (q *Queries) ListClosures(ctx context.Context) ([]*Closure, error) {
 func (q *Queries) ListClosuresInRange(ctx context.Context, from, to time.Time) ([]*Closure, error) {
 	rows, err := q.pool.Query(ctx, `
 		SELECT `+closureSelectCols+` FROM closures
-		WHERE start_date <= $2 AND end_date >= $1
+		WHERE start_date <= $2::date AND end_date >= $1::date
 		ORDER BY start_date`,
 		from, to,
 	)

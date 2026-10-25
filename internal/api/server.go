@@ -74,6 +74,7 @@ func (s *Server) Handler() http.Handler {
 	// API routes
 	r.Route("/api", func(r chi.Router) {
 		// Public
+		r.Get("/health", s.handleHealth)
 		r.Get("/settings/public", s.handleGetPublicSettings)
 		r.Get("/terms", s.handleGetTerms)
 		r.Get("/privacy", s.handleGetPrivacy)

@@ -2,8 +2,13 @@
 SELECT * FROM closures ORDER BY start_date;
 
 -- name: ListClosuresInRange :many
+-- Calendar-date intersection: closures whose [start_date, end_date] overlap the
+-- caller's day range. Casting the instant bounds to ::date keeps the comparison
+-- in whole days, independent of the server/session timezone — comparing DATE
+-- columns against raw timestamptz bounds misses same-day closures whenever the
+-- app timezone is behind UTC (e.g. America/Denver).
 SELECT * FROM closures
-WHERE start_date <= $2 AND end_date >= $1
+WHERE start_date <= $2::date AND end_date >= $1::date
 ORDER BY start_date;
 
 -- name: GetClosure :one

@@ -105,8 +105,11 @@ func (s *Server) handleGetAvailability(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check if the date falls in a closure
-	closures, err := s.queries.ListClosuresInRange(r.Context(), date, date.AddDate(0, 0, 1))
+	// Check if the date falls in a closure. Bounds are the exact requested
+	// calendar day (UTC midnight), so the calendar-date intersection in
+	// ListClosuresInRange returns precisely the closures covering this day.
+	dayUTC := time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, time.UTC)
+	closures, err := s.queries.ListClosuresInRange(r.Context(), dayUTC, dayUTC)
 	if err != nil {
 		s.writeError(w, r, http.StatusInternalServerError, "failed to load closures", err)
 		return

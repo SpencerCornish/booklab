@@ -282,6 +282,17 @@ func (s *Server) handleAdminChangePassword(w http.ResponseWriter, r *http.Reques
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// validBookingStatuses mirrors the booking_status enum (001/003 migrations).
+// Query params and JSON bodies carrying status strings are validated against
+// it so bad input is a 400 instead of a Postgres enum-cast error (500).
+var validBookingStatuses = map[db.BookingStatus]bool{
+	db.BookingStatusConfirmed: true,
+	db.BookingStatusCancelled: true,
+	db.BookingStatusCompleted: true,
+	db.BookingStatusCharging:  true,
+	db.BookingStatusCharged:   true,
+}
+
 func (s *Server) handleAdminListBookings(w http.ResponseWriter, r *http.Request) {
 	params := db.ListBookingsParams{}
 
@@ -295,6 +306,10 @@ func (s *Server) handleAdminListBookings(w http.ResponseWriter, r *http.Request)
 	}
 	if st := r.URL.Query().Get("status"); st != "" {
 		status := db.BookingStatus(st)
+		if !validBookingStatuses[status] {
+			s.writeError(w, r, http.StatusBadRequest, "invalid status filter", nil)
+			return
+		}
 		params.Status = &status
 	}
 
@@ -330,6 +345,10 @@ func (s *Server) handleAdminUpdateBooking(w http.ResponseWriter, r *http.Request
 	if req.EndTime != nil {
 		booking, err = s.queries.UpdateBookingEndTime(r.Context(), id, *req.EndTime)
 	} else if req.Status != nil {
+		if !validBookingStatuses[*req.Status] {
+			s.writeError(w, r, http.StatusBadRequest, "invalid status", nil)
+			return
+		}
 		if *req.Status == db.BookingStatusCompleted {
 			existing, gerr := s.queries.GetBookingByID(r.Context(), id)
 			if gerr != nil {

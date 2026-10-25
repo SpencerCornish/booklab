@@ -1,0 +1,23 @@
+# Functional-test stack: isolated Postgres + Mailpit for out-of-process suites.
+# Never used for development data — ports are non-default so dev servers can run
+# alongside. Managed by tests/scripts/*.sh with project name booklab-functest.
+services:
+  db:
+    image: postgres:16-alpine
+    ports:
+      - "${FUNCTEST_POSTGRES_PORT:-5433}:5432"
+    environment:
+      POSTGRES_DB: booklab
+      POSTGRES_USER: booklab
+      POSTGRES_PASSWORD: booklab
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U booklab"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  mailpit:
+    image: axllent/mailpit:latest
+    ports:
+      - "${FUNCTEST_SMTP_PORT:-1026}:1025"
+      - "${FUNCTEST_MAILPIT_UI_PORT:-8027}:8025"

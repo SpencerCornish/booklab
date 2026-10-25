@@ -16,6 +16,7 @@ import (
 	emailsvc "github.com/spencercornish/booklab/internal/email"
 
 	"github.com/spencercornish/booklab/internal/db"
+	"github.com/spencercornish/booklab/internal/stripe/stripetest"
 )
 
 func boolPtr(b bool) *bool { return &b }
@@ -161,7 +162,7 @@ func TestAvailability_newUserSeesTrainerSlots(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	srv := New(testConfig(), q, &mockStripe{}, emailsvc.New("127.0.0.1", 1025, "", "", "booklab@localhost", testLogger()), nil, testLogger())
+	srv := New(testConfig(), q, stripetest.New(), emailsvc.New("127.0.0.1", 1025, "", "", "booklab@localhost", testLogger()), nil, testLogger())
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 
@@ -232,7 +233,7 @@ func TestAvailability_newUserNoTrainerWindowReturnsNoSlots(t *testing.T) {
 
 	enableNewUserGate(t, ctx, q, "", []db.NewUserWindow{{Weekday: (int(gateTestDate.Weekday()) + 1) % 7, Start: "10:00", End: "12:00"}})
 
-	srv := New(testConfig(), q, &mockStripe{}, emailsvc.New("127.0.0.1", 1025, "", "", "booklab@localhost", testLogger()), nil, testLogger())
+	srv := New(testConfig(), q, stripetest.New(), emailsvc.New("127.0.0.1", 1025, "", "", "booklab@localhost", testLogger()), nil, testLogger())
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 
@@ -270,7 +271,7 @@ func TestCreateBooking_newUserValidationAndPersistence(t *testing.T) {
 	// Trainer hours 18:00–21:00, outside the normal 10:00–16:00 window.
 	enableNewUserGate(t, ctx, q, "Have you trained here before?", []db.NewUserWindow{{Weekday: int(gateTestDate.Weekday()), Start: "18:00", End: "21:00"}})
 
-	srv := New(testConfig(), q, &mockStripe{}, emailsvc.New("127.0.0.1", 1025, "", "", "booklab@localhost", testLogger()), nil, testLogger())
+	srv := New(testConfig(), q, stripetest.New(), emailsvc.New("127.0.0.1", 1025, "", "", "booklab@localhost", testLogger()), nil, testLogger())
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 
@@ -295,15 +296,22 @@ func TestCreateBooking_newUserValidationAndPersistence(t *testing.T) {
 			si, start.Format(time.RFC3339), end.Format(time.RFC3339), extra)
 	}
 
+	// IDs accepted by the shared fake: answer/hours validation happens after
+	// card confirmation in production, so these cases use confirmed intents.
+	siMissing := mintSetupIntentID(t)
+	siOutside := mintSetupIntentID(t)
+	siInside := mintSetupIntentID(t)
+	siExperienced := mintSetupIntentID(t)
+
 	// Missing answer while the gate is enabled.
-	code, body := create(payload("si_gate_missing", insideStart, insideEnd, ""))
+	code, body := create(payload(siMissing, insideStart, insideEnd, ""))
 	if code != http.StatusBadRequest || body["error"] != "please answer the pre-booking question" {
 		t.Fatalf("missing answer: status %d body %v", code, body)
 	}
 
 	// Answering "new" but booking outside trainer hours (normal hours are
 	// irrelevant for new users, so 13:00–15:00 must be rejected too).
-	code, body = create(payload("si_gate_outside", gateTestDate.Add(13*time.Hour), gateTestDate.Add(15*time.Hour), `,"new_user":true`))
+	code, body = create(payload(siOutside, gateTestDate.Add(13*time.Hour), gateTestDate.Add(15*time.Hour), `,"new_user":true`))
 	if code != http.StatusBadRequest {
 		t.Fatalf("outside trainer hours: status %d body %v", code, body)
 	}
@@ -312,11 +320,11 @@ func TestCreateBooking_newUserValidationAndPersistence(t *testing.T) {
 	}
 
 	// Answering "new" inside trainer hours stores the answer.
-	code, body = create(payload("si_gate_inside", insideStart, insideEnd, `,"new_user":true`))
+	code, body = create(payload(siInside, insideStart, insideEnd, `,"new_user":true`))
 	if code != http.StatusCreated {
 		t.Fatalf("inside trainer hours: status %d body %v", code, body)
 	}
-	created, err := q.GetBookingBySetupIntentID(ctx, "si_gate_inside")
+	created, err := q.GetBookingBySetupIntentID(ctx, siInside)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -327,11 +335,11 @@ func TestCreateBooking_newUserValidationAndPersistence(t *testing.T) {
 	// Experienced answer inside normal hours stores false.
 	expStart := gateTestDate.Add(12 * time.Hour)
 	expEnd := expStart.Add(2 * time.Hour)
-	code, _ = create(payload("si_gate_exp", expStart, expEnd, `,"new_user":false`))
+	code, _ = create(payload(siExperienced, expStart, expEnd, `,"new_user":false`))
 	if code != http.StatusCreated {
 		t.Fatalf("experienced booking: status %d", code)
 	}
-	experienced, err := q.GetBookingBySetupIntentID(ctx, "si_gate_exp")
+	experienced, err := q.GetBookingBySetupIntentID(ctx, siExperienced)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -346,7 +354,7 @@ func TestPublicSettings_newUserGate(t *testing.T) {
 	truncateBookingData(t, ctx, pool)
 	resetSettingsUTC(t, ctx, q)
 
-	srv := New(testConfig(), q, &mockStripe{}, emailsvc.New("127.0.0.1", 1025, "", "", "booklab@localhost", testLogger()), nil, testLogger())
+	srv := New(testConfig(), q, stripetest.New(), emailsvc.New("127.0.0.1", 1025, "", "", "booklab@localhost", testLogger()), nil, testLogger())
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 
@@ -583,7 +591,7 @@ func TestAvailableDaysEndpoint_newUserOnlyTrainerDays(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	srv := New(testConfig(), q, &mockStripe{}, emailsvc.New("127.0.0.1", 1025, "", "", "booklab@localhost", testLogger()), nil, testLogger())
+	srv := New(testConfig(), q, stripetest.New(), emailsvc.New("127.0.0.1", 1025, "", "", "booklab@localhost", testLogger()), nil, testLogger())
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 
