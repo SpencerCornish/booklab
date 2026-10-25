@@ -13,6 +13,18 @@ jsonpath "$.slots[0].start" == "2030-03-15T09:00:00-06:00"
 jsonpath "$.slots[11].start" == "2030-03-15T20:00:00-06:00"
 jsonpath "$.slots[*].available" contains true
 
+# The day-strip endpoint that drives the availability-aware date picker. It is
+# anchored to "now" (window capped at 90 days), so assertions use near-term
+# dates passed in by the runner.
+GET {{base_url}}/api/availability/days?days=30
+HTTP 200
+[Asserts]
+jsonpath "$.available_dates" contains "{{tomorrow}}"
+jsonpath "$.available_dates" contains "{{day_after}}"
+
+GET {{base_url}}/api/availability/days?days=nope
+HTTP 400
+
 # Book 10:00-12:00; the two covered slots must disappear.
 POST {{base_url}}/api/bookings/prepare
 {"email": "{{customer_email}}", "start_time": "{{booking_start}}", "end_time": "{{booking_end}}"}
@@ -48,13 +60,36 @@ X-CSRF-Token: {{csrf}}
 {"start_date": "{{other_date}}", "end_date": "{{other_date}}", "reason": "Painting weekend"}
 HTTP 201
 
-# Closed day: no slots, reason echoed back.
+# Closed day: no slots, reason echoed back — and the day-strip no longer
+# offers it.
 GET {{base_url}}/api/availability?date={{other_date}}
 HTTP 200
 [Asserts]
 jsonpath "$.is_closed" == true
 jsonpath "$.closure_reason" == "Painting weekend"
 jsonpath "$.slots" count == 0
+
+GET {{base_url}}/api/availability/days?days=30
+HTTP 200
+[Asserts]
+jsonpath "$.available_dates" not contains "2030-03-20"
+
+# A near-term closure drops the day from the strip and closes the date itself.
+POST {{base_url}}/api/admin/closures
+X-CSRF-Token: {{csrf}}
+{"start_date": "{{tomorrow}}", "end_date": "{{tomorrow}}", "reason": "Short notice"}
+HTTP 201
+
+GET {{base_url}}/api/availability?date={{tomorrow}}
+HTTP 200
+[Asserts]
+jsonpath "$.is_closed" == true
+jsonpath "$.closure_reason" == "Short notice"
+
+GET {{base_url}}/api/availability/days?days=30
+HTTP 200
+[Asserts]
+jsonpath "$.available_dates" not contains "{{tomorrow}}"
 
 # Partial closure 12:00-14:00 on the open day: exactly slots 12:00 + 13:00 blocked.
 POST {{base_url}}/api/admin/closures

@@ -49,7 +49,7 @@ test('closures can be created and deleted through the UI', async ({ page }) => {
 
 test('settings editor round-trips a value', async ({ page }) => {
   await adminLogin(page)
-  await page.goto('/admin/settings')
+  await page.goto('/admin/settings/general')
   await expect(page.getByRole('heading', { name: 'Settings', level: 1 })).toBeVisible()
 
   const resourceName = page.locator('label:text-is("Resource name") + input')
@@ -66,7 +66,7 @@ test('settings editor round-trips a value', async ({ page }) => {
 
   // Restore.
   await adminLogin(page)
-  await page.goto('/admin/settings')
+  await page.goto('/admin/settings/general')
   await page.locator('label:text-is("Resource name") + input').fill('The Space')
   await page.getByRole('button', { name: 'Save settings' }).click()
   await expect(page.getByText('Saved!')).toBeVisible()

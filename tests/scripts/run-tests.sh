@@ -34,6 +34,11 @@ mkdir -p "$ROOT/.functest"
 
 case "$MODE" in
   hurl)
+    # Near-term dates for the availability day-strip endpoint (it is anchored
+    # to "now" — it feeds the picker's 60-day window). Computed in the app's
+    # settings timezone so the calendar date is unambiguous around midnight.
+    TOMORROW="$(TZ=America/Denver date -d tomorrow +%F)"
+    DAY_AFTER="$(TZ=America/Denver date -d 'tomorrow + 1 day' +%F)"
     FIRST=1
     for f in "$ROOT"/tests/hurl/suites/*.hurl; do
       [ "$FIRST" -eq 0 ] && "$ROOT/tests/scripts/reset-db.sh"
@@ -43,6 +48,8 @@ case "$MODE" in
       "$HURL_BIN" --test \
         --variables-file "$ROOT/tests/hurl/vars/functional.env" \
         --variable "run_id=$(date +%s)" \
+        --variable "tomorrow=$TOMORROW" \
+        --variable "day_after=$DAY_AFTER" \
         --report-junit "$ROOT/.functest/junit-${name}.xml" \
         "$f" || STATUS=$?
     done

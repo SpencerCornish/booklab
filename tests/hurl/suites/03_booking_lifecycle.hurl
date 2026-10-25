@@ -22,8 +22,8 @@ booking_token: jsonpath "$.booking.cancel_token"
 jsonpath "$.booking.status" == "confirmed"
 jsonpath "$.booking.name" == "{{customer_name}}"
 jsonpath "$.booking.email" == "{{customer_email}}"
-jsonpath "$.booking.start_time" == "2030-03-15T10:00:00-06:00"
-jsonpath "$.booking.end_time" == "2030-03-15T12:00:00-06:00"
+jsonpath "$.booking.start_time" == "2030-03-15T16:00:00Z"
+jsonpath "$.booking.end_time" == "2030-03-15T18:00:00Z"
 
 # Idempotent replay: same setup_intent_id returns the same booking.
 POST {{base_url}}/api/bookings
@@ -58,7 +58,7 @@ POST {{base_url}}/api/bookings
 {"setup_intent_id": "{{setup_intent_conflict}}", "name": "Adjacent Booker", "email": "adjacent.functest@example.com", "start_time": "{{booking_end}}", "end_time": "{{next_start}}"}
 HTTP 201
 [Asserts]
-jsonpath "$.booking.start_time" == "2030-03-15T12:00:00-06:00"
+jsonpath "$.booking.start_time" == "2030-03-15T18:00:00Z"
 
 # Validation errors.
 POST {{base_url}}/api/bookings/prepare

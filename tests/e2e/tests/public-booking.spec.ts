@@ -17,13 +17,15 @@ test('date picker and slot grid reflect availability', async ({ page }) => {
   await expect(page.getByRole('button', { name: '8:00 PM' })).toBeVisible()
 })
 
-test('closed days show the closure banner instead of slots', async ({ page }) => {
+test('closed days are disabled in the date picker', async ({ page }) => {
   const date = futureDate(22)
   await createClosure(page, { startDate: date, endDate: date, reason: 'E2E Painting' })
 
   await page.goto('/')
-  await page.getByRole('button', { name: dateButtonLabel(date), exact: true }).click()
-  await expect(page.getByText(/This date is closed: E2E Painting/)).toBeVisible()
+  // The availability-aware date picker greys closed days out and explains why.
+  const dayButton = page.getByRole('button', { name: dateButtonLabel(date), exact: true })
+  await expect(dayButton).toBeDisabled()
+  await expect(dayButton).toHaveAttribute('title', 'No availability')
 })
 
 test('slot selection, totals, and form guardrails before payment', async ({ page }) => {

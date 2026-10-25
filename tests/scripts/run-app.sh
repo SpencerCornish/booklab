@@ -10,6 +10,12 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$ROOT/tests/scripts/lib.sh"
 
 BIN="${FUNCTEST_APP_BIN:-$ROOT/booklab}"
+
+# Pin the server's local timezone. pgx decodes timestamptz into time.Local, so
+# JSON serialization of booking times would otherwise depend on the host's TZ
+# (dev laptop vs UTC-based CI runners vs production containers). UTC matches
+# production (the Docker image ships no TZ setting).
+export TZ=UTC
 if [ ! -x "$BIN" ]; then
   echo "run-app: $BIN not found or not executable; run 'make build' first" >&2
   exit 1

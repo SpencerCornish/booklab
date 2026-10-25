@@ -69,7 +69,7 @@ X-CSRF-Token: {{csrf}}
 {"end_time": "{{extended_end}}"}
 HTTP 200
 [Asserts]
-jsonpath "$.end_time" == "2030-03-15T13:00:00-06:00"
+jsonpath "$.end_time" == "2030-03-15T19:00:00Z"
 
 # Mark completed (payment method on file → allowed).
 PATCH {{base_url}}/api/admin/bookings/{{booking_id}}
