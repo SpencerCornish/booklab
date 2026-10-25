@@ -315,6 +315,15 @@ func (s *Server) handlePrepareBooking(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Rate limit last, so requests that fail validation do not use up the caller's budget.
+	if limited, err := s.limitBookingPrepare(r.Context(), s.clientIP(r)); err != nil {
+		s.writeError(w, r, http.StatusInternalServerError, "failed to prepare booking", err)
+		return
+	} else if limited {
+		s.writeError(w, r, http.StatusTooManyRequests, "too many booking attempts, try again later", nil)
+		return
+	}
+
 	setupIntentID, clientSecret, err := s.stripe.CreateSetupIntent(req.Email)
 	if err != nil {
 		s.writeError(w, r, http.StatusInternalServerError, "failed to create payment setup", err)
@@ -325,6 +334,62 @@ func (s *Server) handlePrepareBooking(w http.ResponseWriter, r *http.Request) {
 		"setup_intent_id":            setupIntentID,
 		"setup_intent_client_secret": clientSecret,
 	})
+}
+
+const (
+	bookingPrepareRateLimitWindow = time.Hour
+	bookingPrepareRateLimitMax    = 10
+)
+
+// limitBookingPrepare records a SetupIntent creation for ip and reports whether ip is over
+// the limit. Each prepare creates a Stripe customer and SetupIntent, which card testers use
+// to check stolen cards. The attempt is recorded before counting so concurrent requests see
+// each other; rejected attempts are removed so they do not extend the lockout.
+func (s *Server) limitBookingPrepare(ctx context.Context, ip string) (bool, error) {
+	id, err := s.queries.RecordBookingPrepareAttempt(ctx, ip)
+	if err != nil {
+		return false, err
+	}
+	n, err := s.queries.CountRecentBookingPrepareAttempts(ctx, ip, time.Now().Add(-bookingPrepareRateLimitWindow))
+	if err != nil {
+		return false, err
+	}
+	if n <= bookingPrepareRateLimitMax {
+		return false, nil
+	}
+	if err := s.queries.DeleteBookingPrepareAttempt(ctx, id); err != nil {
+		return false, err
+	}
+	s.logger.Warn("booking_prepare_rate_limited", "client_ip", ip)
+	return true, nil
+}
+
+const (
+	bookingCreateRateLimitWindow = time.Hour
+	bookingCreateRateLimitMax    = 20
+)
+
+// limitBookingCreate records a booking-create attempt for ip and reports whether ip is
+// over the limit. The endpoint is unauthenticated and writes rows, so a per-IP cap keeps
+// junk insertions bounded. The attempt is recorded before counting so concurrent requests
+// see each other; rejected attempts are removed so they do not extend the lockout.
+func (s *Server) limitBookingCreate(ctx context.Context, ip string) (bool, error) {
+	id, err := s.queries.RecordBookingCreateAttempt(ctx, ip)
+	if err != nil {
+		return false, err
+	}
+	n, err := s.queries.CountRecentBookingCreateAttempts(ctx, ip, time.Now().Add(-bookingCreateRateLimitWindow))
+	if err != nil {
+		return false, err
+	}
+	if n <= bookingCreateRateLimitMax {
+		return false, nil
+	}
+	if err := s.queries.DeleteBookingCreateAttempt(ctx, id); err != nil {
+		return false, err
+	}
+	s.logger.Warn("booking_create_rate_limited", "client_ip", ip)
+	return true, nil
 }
 
 func (s *Server) handleCreateBooking(w http.ResponseWriter, r *http.Request) {
@@ -359,6 +424,16 @@ func (s *Server) handleCreateBooking(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != pgx.ErrNoRows {
 		s.writeError(w, r, http.StatusInternalServerError, "failed to load booking", err)
+		return
+	}
+
+	// Rate limit after the idempotent replay above, so retries of the same
+	// setup_intent_id do not use up the caller's budget.
+	if limited, err := s.limitBookingCreate(r.Context(), s.clientIP(r)); err != nil {
+		s.writeError(w, r, http.StatusInternalServerError, "failed to create booking", err)
+		return
+	} else if limited {
+		s.writeError(w, r, http.StatusTooManyRequests, "too many booking requests, try again later", nil)
 		return
 	}
 

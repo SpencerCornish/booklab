@@ -14,7 +14,7 @@ if ! db_ready; then
 fi
 
 "${COMPOSE[@]}" exec -T db psql -U booklab -d booklab -v ON_ERROR_STOP=1 <<'SQL'
-TRUNCATE bookings, closures, admin_sessions, login_attempts;
+TRUNCATE bookings, closures, admin_sessions, login_attempts, booking_prepare_attempts, booking_create_attempts;
 TRUNCATE settings;
 INSERT INTO settings DEFAULT VALUES;
 SQL

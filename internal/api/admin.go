@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"sort"
 	"strconv"
@@ -17,23 +16,21 @@ import (
 	"github.com/jackc/pgx/v5"
 	"golang.org/x/crypto/bcrypt"
 
+	"github.com/spencercornish/booklab/internal/config"
 	"github.com/spencercornish/booklab/internal/db"
 	emailsvc "github.com/spencercornish/booklab/internal/email"
+	stripesvc "github.com/spencercornish/booklab/internal/stripe"
 )
 
 const (
-	loginRateLimitWindow   = 15 * time.Minute
-	loginRateLimitMax      = 10
-	minAdminPasswordLength = 8
+	loginRateLimitWindow = 15 * time.Minute
+	loginRateLimitMax    = 10
 )
 
-func clientIP(r *http.Request) string {
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		return r.RemoteAddr
-	}
-	return host
-}
+// dummyPasswordHash is compared against when the username does not exist, so an
+// unknown username costs the same bcrypt work as a wrong password and response
+// timing cannot reveal which admin usernames exist.
+var dummyPasswordHash, _ = bcrypt.GenerateFromPassword([]byte("booklab-dummy-password"), bcrypt.DefaultCost)
 
 func (s *Server) handleAdminLogin(w http.ResponseWriter, r *http.Request) {
 	var req struct {
@@ -46,8 +43,15 @@ func (s *Server) handleAdminLogin(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 	since := time.Now().Add(-loginRateLimitWindow)
-	ip := clientIP(r)
+	ip := s.clientIP(r)
 
+	// Record the attempt as failed before counting, so concurrent requests see each other
+	// and a burst cannot all pass the check while the first ones are still in bcrypt.
+	attemptID, err := s.queries.RecordLoginAttempt(ctx, req.Username, ip, false)
+	if err != nil {
+		s.writeError(w, r, http.StatusInternalServerError, "login failed", err)
+		return
+	}
 	ipFails, err := s.queries.CountRecentFailedLoginAttemptsByIP(ctx, ip, since)
 	if err != nil {
 		s.writeError(w, r, http.StatusInternalServerError, "login failed", err)
@@ -58,7 +62,9 @@ func (s *Server) handleAdminLogin(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, r, http.StatusInternalServerError, "login failed", err)
 		return
 	}
-	if ipFails >= loginRateLimitMax || userFails >= loginRateLimitMax {
+	// The counts include this attempt.
+	if ipFails > loginRateLimitMax || userFails > loginRateLimitMax {
+		_ = s.queries.DeleteLoginAttempt(ctx, attemptID)
 		s.writeError(w, r, http.StatusTooManyRequests, "too many failed login attempts, try again later", nil)
 		return
 	}
@@ -66,7 +72,7 @@ func (s *Server) handleAdminLogin(w http.ResponseWriter, r *http.Request) {
 	user, err := s.queries.GetAdminByUsername(ctx, req.Username)
 	if err != nil {
 		if err == pgx.ErrNoRows {
-			_ = s.queries.RecordLoginAttempt(ctx, req.Username, ip, false)
+			_ = bcrypt.CompareHashAndPassword(dummyPasswordHash, []byte(req.Password))
 			s.writeError(w, r, http.StatusUnauthorized, "invalid credentials", nil)
 			return
 		}
@@ -75,12 +81,11 @@ func (s *Server) handleAdminLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.Password)); err != nil {
-		_ = s.queries.RecordLoginAttempt(ctx, req.Username, ip, false)
 		s.writeError(w, r, http.StatusUnauthorized, "invalid credentials", nil)
 		return
 	}
 
-	if err := s.queries.RecordLoginAttempt(ctx, req.Username, ip, true); err != nil {
+	if err := s.queries.MarkLoginAttemptSucceeded(ctx, attemptID); err != nil {
 		s.writeError(w, r, http.StatusInternalServerError, "login failed", err)
 		return
 	}
@@ -155,8 +160,8 @@ func (s *Server) handleAdminCreateUser(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, r, http.StatusBadRequest, "username is required", nil)
 		return
 	}
-	if len(req.Password) < minAdminPasswordLength {
-		s.writeError(w, r, http.StatusBadRequest, fmt.Sprintf("password must be at least %d characters", minAdminPasswordLength), nil)
+	if len(req.Password) < config.MinAdminPasswordLength {
+		s.writeError(w, r, http.StatusBadRequest, fmt.Sprintf("password must be at least %d characters", config.MinAdminPasswordLength), nil)
 		return
 	}
 
@@ -234,8 +239,8 @@ func (s *Server) handleAdminChangePassword(w http.ResponseWriter, r *http.Reques
 		s.writeError(w, r, http.StatusBadRequest, "current_password is required", nil)
 		return
 	}
-	if len(req.NewPassword) < minAdminPasswordLength {
-		s.writeError(w, r, http.StatusBadRequest, fmt.Sprintf("new_password must be at least %d characters", minAdminPasswordLength), nil)
+	if len(req.NewPassword) < config.MinAdminPasswordLength {
+		s.writeError(w, r, http.StatusBadRequest, fmt.Sprintf("new_password must be at least %d characters", config.MinAdminPasswordLength), nil)
 		return
 	}
 
@@ -449,7 +454,7 @@ func (s *Server) handleAdminChargeBooking(w http.ResponseWriter, r *http.Request
 
 	settings, err := s.queries.GetSettings(r.Context())
 	if err != nil {
-		_ = s.queries.RevertBookingFromChargingToCompleted(r.Context(), id, "internal: failed to load settings")
+		_ = s.queries.RevertBookingFromChargingToCompleted(r.Context(), id, "internal: failed to load settings", false)
 		s.writeError(w, r, http.StatusInternalServerError, "failed to load settings", err)
 		return
 	}
@@ -457,7 +462,7 @@ func (s *Server) handleAdminChargeBooking(w http.ResponseWriter, r *http.Request
 	var amountCents int32
 	if req.AmountCents != nil {
 		if *req.AmountCents <= 0 || *req.AmountCents > maxChargeAmountCents {
-			_ = s.queries.RevertBookingFromChargingToCompleted(r.Context(), id, "internal: invalid amount_cents provided")
+			_ = s.queries.RevertBookingFromChargingToCompleted(r.Context(), id, "internal: invalid amount_cents provided", false)
 			s.writeError(w, r, http.StatusBadRequest, "invalid amount_cents", nil)
 			return
 		}
@@ -469,17 +474,16 @@ func (s *Server) handleAdminChargeBooking(w http.ResponseWriter, r *http.Request
 		}
 		amountCents = hours * settings.HourlyRateCents
 		if amountCents <= 0 || amountCents > maxChargeAmountCents {
-			_ = s.queries.RevertBookingFromChargingToCompleted(r.Context(), id, "internal: computed charge amount is out of allowed range")
+			_ = s.queries.RevertBookingFromChargingToCompleted(r.Context(), id, "internal: computed charge amount is out of allowed range", false)
 			s.writeError(w, r, http.StatusBadRequest, "computed charge amount is out of allowed range", nil)
 			return
 		}
 	}
 
-	description := settings.ResourceName + " – " + booking.StartTime.Format("Jan 2, 2006")
-	idempotencyKey := fmt.Sprintf("charge-booking-%d-admin", id)
-	piID, receiptURL, err := s.stripe.ChargePaymentMethod(*booking.StripePaymentMethodID, int64(amountCents), settings.Currency, description, idempotencyKey)
+	piID, receiptURL, err := s.stripe.ChargePaymentMethod(*booking.StripePaymentMethodID, int64(amountCents), settings.Currency,
+		stripesvc.ChargeDescription(settings.ResourceName, booking.StartTime), *booking.ChargeIdempotencyKey)
 	if err != nil {
-		_ = s.queries.RevertBookingFromChargingToCompleted(r.Context(), id, err.Error())
+		_ = s.queries.RevertBookingFromChargingToCompleted(r.Context(), id, err.Error(), stripesvc.IsDefiniteFailure(err))
 		s.logger.Error("admin charge stripe failed", "booking_id", id, "email", booking.Email, "error", err)
 		go func(chargeErr string) {
 			failureData := emailsvc.StaffChargeFailureData{

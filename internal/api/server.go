@@ -5,6 +5,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/http"
+	"net/netip"
 	"strings"
 	"time"
 
@@ -25,15 +26,24 @@ type Server struct {
 	email   *emailsvc.Service
 	webFS   fs.FS
 	logger  *slog.Logger
+
+	trustedProxies []netip.Prefix
 }
 
 func New(cfg *config.Config, queries *db.Queries, stripe stripesvc.Client, email *emailsvc.Service, webFS fs.FS, log *slog.Logger) *Server {
 	if log == nil {
 		log = slog.Default()
 	}
+	logger := log.With("component", "api")
+	// config.Load already rejects a bad TRUSTED_PROXIES; this only fails for hand-built configs.
+	trusted, err := cfg.TrustedProxyPrefixes()
+	if err != nil {
+		logger.Error("invalid trusted proxies, trusting none", "error", err)
+		trusted = nil
+	}
 	return &Server{
 		cfg: cfg, queries: queries, stripe: stripe, email: email, webFS: webFS,
-		logger: log.With("component", "api"),
+		logger: logger, trustedProxies: trusted,
 	}
 }
 
@@ -52,6 +62,7 @@ func (s *Server) slogRequestLogger(next http.Handler) http.Handler {
 			"status", status,
 			"duration_ms", time.Since(start).Milliseconds(),
 			"remote_addr", r.RemoteAddr,
+			"client_ip", s.clientIP(r),
 		}
 		level := s.httpRequestLogLevel(r.URL.Path, status)
 		s.logger.Log(r.Context(), level, "http_request", attrs...)
@@ -61,7 +72,7 @@ func (s *Server) slogRequestLogger(next http.Handler) http.Handler {
 func (s *Server) Handler() http.Handler {
 	r := chi.NewRouter()
 
-	r.Use(middleware.RealIP)
+	r.Use(s.securityHeaders)
 	r.Use(middleware.Recoverer)
 	r.Use(s.slogRequestLogger)
 	r.Use(cors.Handler(cors.Options{

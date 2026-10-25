@@ -76,6 +76,10 @@ func bootstrapAdmin(ctx context.Context, queries *db.Queries, username, password
 	if _, err := queries.GetAdminByUsername(ctx, username); err == nil {
 		return // already exists
 	}
+	if len(password) < config.MinAdminPasswordLength {
+		slog.Error("bootstrap admin password too short", "username", username, "min_length", config.MinAdminPasswordLength)
+		os.Exit(1)
+	}
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
 		slog.Error("bootstrap admin bcrypt failed", "error", err)

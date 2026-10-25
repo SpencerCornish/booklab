@@ -35,7 +35,8 @@ All configuration is via environment variables (see `.env.example`):
 | `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASS` / `SMTP_FROM` | Email config |
 | `APP_URL` | Public URL (used in email links and as the default CORS origin) |
 | `CORS_ALLOWED_ORIGINS` | Optional comma-separated list of allowed browser origins for credentialed API requests; defaults to `APP_URL` when empty |
-| `ADMIN_USER` / `ADMIN_PASS` | Bootstrap admin credentials (first run only) |
+| `TRUSTED_PROXIES` | Optional comma-separated IPs/CIDRs of reverse proxies whose `X-Forwarded-For` header is trusted for the client IP (used by rate limits and logs). Defaults to loopback and private ranges; set it to empty to trust no proxy |
+| `ADMIN_USER` / `ADMIN_PASS` | Bootstrap admin credentials (first run only; password must be at least 8 characters) |
 | `STRIPE_WEBHOOK_SECRET` | Optional; reserved for future Stripe webhook support |
 | `POSTGRES_PASSWORD` / `POSTGRES_HOST_PORT` | Used by `docker compose` for the local/dev Postgres service (see `.env.example`) |
 | `VITE_STRIPE_PUBLISHABLE_KEY` | Stripe publishable key; passed into the Docker **build** for embedded frontend (see `.env.example`) |

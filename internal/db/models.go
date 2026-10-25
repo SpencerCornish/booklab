@@ -37,6 +37,7 @@ type Booking struct {
 	CompletedAt           *time.Time        `json:"completed_at"`
 	ChargeAttempts        int32             `json:"charge_attempts"`
 	LastChargeError       *string           `json:"last_charge_error"`
+	ChargeIdempotencyKey  *string           `json:"charge_idempotency_key"`
 	CreatedAt             time.Time         `json:"created_at"`
 	UpdatedAt             time.Time         `json:"updated_at"`
 	IsNewUser             *bool             `json:"is_new_user"`

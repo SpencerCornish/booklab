@@ -33,6 +33,10 @@ func New(queries *db.Queries, emailSvc *email.Service, stripeSvc stripe.Client, 
 	}
 }
 
+// rateLimitRetention is how long login and booking-prepare attempts are kept. It only
+// needs to exceed the longest rate limit window; the rest is for investigating abuse.
+const rateLimitRetention = 7 * 24 * time.Hour
+
 // Start runs a background ticker that checks for reminder emails and auto-charges.
 // It runs every 30 minutes. Call this in a goroutine.
 func (s *Scheduler) Start(ctx context.Context) {
@@ -58,6 +62,10 @@ func (s *Scheduler) runOnce(ctx context.Context) {
 	if err != nil {
 		s.logger.Error("scheduler get settings failed", "error", err)
 		return
+	}
+
+	if err := s.queries.DeleteRateLimitRecordsBefore(ctx, time.Now().Add(-rateLimitRetention)); err != nil {
+		s.logger.Error("scheduler prune rate limit records failed", "error", err)
 	}
 
 	completed := s.completeExpiredBookings(ctx, settings)
@@ -172,18 +180,16 @@ func (s *Scheduler) autoChargeCompleted(ctx context.Context, settings *db.Settin
 		amountCents := hours * settings.HourlyRateCents
 		if amountCents <= 0 || amountCents > maxChargeAmountCents {
 			msg := fmt.Sprintf("computed charge amount %d cents is out of allowed range", amountCents)
-			_ = s.queries.RevertBookingFromChargingToCompleted(ctx, b.ID, msg)
+			_ = s.queries.RevertBookingFromChargingToCompleted(ctx, b.ID, msg, false)
 			s.logger.Warn("scheduler auto-charge amount out of range",
 				"booking_id", b.ID, "email", b.Email, "amount_cents", amountCents)
 			continue
 		}
 
-		description := settings.ResourceName + " – " + b.StartTime.Format("Jan 2, 2006") + " (auto)"
-		idempotencyKey := fmt.Sprintf("charge-booking-%d-auto", b.ID)
-
-		piID, receiptURL, err := s.stripe.ChargePaymentMethod(*b.StripePaymentMethodID, int64(amountCents), settings.Currency, description, idempotencyKey)
+		piID, receiptURL, err := s.stripe.ChargePaymentMethod(*b.StripePaymentMethodID, int64(amountCents), settings.Currency,
+			stripe.ChargeDescription(settings.ResourceName, b.StartTime), *b.ChargeIdempotencyKey)
 		if err != nil {
-			_ = s.queries.RevertBookingFromChargingToCompleted(ctx, b.ID, err.Error())
+			_ = s.queries.RevertBookingFromChargingToCompleted(ctx, b.ID, err.Error(), stripe.IsDefiniteFailure(err))
 			s.logger.Error("scheduler auto-charge stripe failed", "booking_id", b.ID, "email", b.Email, "error", err)
 			go func(booking *db.Booking, amount int32, chargeErr string) {
 				failureData := email.StaffChargeFailureData{

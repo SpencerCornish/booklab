@@ -316,7 +316,9 @@ func (q *Queries) CompleteExpiredBookings(ctx context.Context) ([]*Booking, erro
 // Returns pgx.ErrNoRows if the booking is missing or not eligible.
 func (q *Queries) ClaimBookingForCharge(ctx context.Context, id int32) (*Booking, error) {
 	row := q.pool.QueryRow(ctx, `
-		UPDATE bookings SET status = 'charging'
+		UPDATE bookings
+		SET status = 'charging',
+		    charge_idempotency_key = COALESCE(charge_idempotency_key, 'charge-booking-' || id || '-' || (charge_attempts + 1))
 		WHERE id = $1
 		  AND status = 'completed'
 		  AND stripe_payment_method_id IS NOT NULL
@@ -334,7 +336,8 @@ func (q *Queries) ClaimBookingForCharge(ctx context.Context, id int32) (*Booking
 func (q *Queries) ClaimBookingForAutoCharge(ctx context.Context, delayMinutes int32) (*Booking, error) {
 	row := q.pool.QueryRow(ctx, `
 		UPDATE bookings
-		SET status = 'charging'
+		SET status = 'charging',
+		    charge_idempotency_key = COALESCE(charge_idempotency_key, 'charge-booking-' || id || '-' || (charge_attempts + 1))
 		WHERE id = (
 			SELECT id FROM bookings
 			WHERE status = 'completed'
@@ -353,15 +356,18 @@ func (q *Queries) ClaimBookingForAutoCharge(ctx context.Context, delayMinutes in
 }
 
 // RevertBookingFromChargingToCompleted undoes a charge claim after a failed payment attempt,
-// recording the error message and incrementing the attempt counter.
-func (q *Queries) RevertBookingFromChargingToCompleted(ctx context.Context, id int32, chargeErr string) error {
+// recording the error message and incrementing the attempt counter. Pass clearIdempotencyKey
+// only when Stripe definitely took no payment; otherwise the key is kept so the next attempt
+// replays the original request instead of charging again.
+func (q *Queries) RevertBookingFromChargingToCompleted(ctx context.Context, id int32, chargeErr string, clearIdempotencyKey bool) error {
 	_, err := q.pool.Exec(ctx, `
 		UPDATE bookings
 		SET status = 'completed',
 		    charge_attempts   = charge_attempts + 1,
-		    last_charge_error = $2
+		    last_charge_error = $2,
+		    charge_idempotency_key = CASE WHEN $3 THEN NULL ELSE charge_idempotency_key END
 		WHERE id = $1 AND status = 'charging'`,
-		id, chargeErr,
+		id, chargeErr, clearIdempotencyKey,
 	)
 	return err
 }
@@ -420,7 +426,7 @@ func (q *Queries) CancelBooking(ctx context.Context, token uuid.UUID) (*Booking,
 const bookingColumns = `id, name, email, metadata, start_time, end_time, status, cancel_token,
 	stripe_setup_intent_id, stripe_payment_method_id, stripe_payment_intent_id,
 	stripe_receipt_url, amount_cents, reminder_sent, completed_at,
-	charge_attempts, last_charge_error, created_at, updated_at, is_new_user`
+	charge_attempts, last_charge_error, charge_idempotency_key, created_at, updated_at, is_new_user`
 
 func scanBooking(row pgx.Row) (*Booking, error) {
 	var b Booking
@@ -428,7 +434,7 @@ func scanBooking(row pgx.Row) (*Booking, error) {
 		&b.ID, &b.Name, &b.Email, &b.Metadata, &b.StartTime, &b.EndTime, &b.Status, &b.CancelToken,
 		&b.StripeSetupIntentID, &b.StripePaymentMethodID, &b.StripePaymentIntentID,
 		&b.StripeReceiptURL, &b.AmountCents, &b.ReminderSent, &b.CompletedAt,
-		&b.ChargeAttempts, &b.LastChargeError, &b.CreatedAt, &b.UpdatedAt, &b.IsNewUser,
+		&b.ChargeAttempts, &b.LastChargeError, &b.ChargeIdempotencyKey, &b.CreatedAt, &b.UpdatedAt, &b.IsNewUser,
 	)
 	if err != nil {
 		return nil, err
@@ -678,11 +684,28 @@ func (q *Queries) DeleteAdminSessionsByUsername(ctx context.Context, username st
 
 // ----- Login rate limiting -----
 
-func (q *Queries) RecordLoginAttempt(ctx context.Context, username, ipAddress string, success bool) error {
-	_, err := q.pool.Exec(ctx, `
-		INSERT INTO login_attempts (username, ip_address, success) VALUES ($1, $2, $3)`,
+// RecordLoginAttempt inserts an attempt and returns its id. The login handler records the
+// attempt as failed before counting and checking the password, so concurrent attempts
+// count against each other; MarkLoginAttemptSucceeded flips it once the password matches.
+func (q *Queries) RecordLoginAttempt(ctx context.Context, username, ipAddress string, success bool) (int32, error) {
+	var id int32
+	err := q.pool.QueryRow(ctx, `
+		INSERT INTO login_attempts (username, ip_address, success) VALUES ($1, $2, $3)
+		RETURNING id`,
 		username, ipAddress, success,
-	)
+	).Scan(&id)
+	return id, err
+}
+
+func (q *Queries) MarkLoginAttemptSucceeded(ctx context.Context, id int32) error {
+	_, err := q.pool.Exec(ctx, `UPDATE login_attempts SET success = true WHERE id = $1`, id)
+	return err
+}
+
+// DeleteLoginAttempt removes an attempt that was rejected by the rate limit, so only
+// attempts that reached the password check count towards the limit.
+func (q *Queries) DeleteLoginAttempt(ctx context.Context, id int32) error {
+	_, err := q.pool.Exec(ctx, `DELETE FROM login_attempts WHERE id = $1`, id)
 	return err
 }
 
@@ -710,6 +733,72 @@ func (q *Queries) CountRecentFailedLoginAttemptsByUsername(ctx context.Context, 
 		return 0, err
 	}
 	return n, nil
+}
+
+// ----- Booking prepare rate limiting -----
+
+// RecordBookingPrepareAttempt inserts an attempt to create a Stripe SetupIntent and returns its id.
+func (q *Queries) RecordBookingPrepareAttempt(ctx context.Context, ipAddress string) (int32, error) {
+	var id int32
+	err := q.pool.QueryRow(ctx, `
+		INSERT INTO booking_prepare_attempts (ip_address) VALUES ($1) RETURNING id`,
+		ipAddress,
+	).Scan(&id)
+	return id, err
+}
+
+func (q *Queries) CountRecentBookingPrepareAttempts(ctx context.Context, ipAddress string, since time.Time) (int64, error) {
+	var n int64
+	err := q.pool.QueryRow(ctx, `
+		SELECT COUNT(*)::bigint FROM booking_prepare_attempts
+		WHERE ip_address = $1 AND created_at >= $2`,
+		ipAddress, since,
+	).Scan(&n)
+	return n, err
+}
+
+func (q *Queries) DeleteBookingPrepareAttempt(ctx context.Context, id int32) error {
+	_, err := q.pool.Exec(ctx, `DELETE FROM booking_prepare_attempts WHERE id = $1`, id)
+	return err
+}
+
+// ----- Booking create rate limiting -----
+
+// RecordBookingCreateAttempt inserts a booking-create attempt and returns its id.
+func (q *Queries) RecordBookingCreateAttempt(ctx context.Context, ipAddress string) (int32, error) {
+	var id int32
+	err := q.pool.QueryRow(ctx, `
+		INSERT INTO booking_create_attempts (ip_address) VALUES ($1) RETURNING id`,
+		ipAddress,
+	).Scan(&id)
+	return id, err
+}
+
+func (q *Queries) CountRecentBookingCreateAttempts(ctx context.Context, ipAddress string, since time.Time) (int64, error) {
+	var n int64
+	err := q.pool.QueryRow(ctx, `
+		SELECT COUNT(*)::bigint FROM booking_create_attempts
+		WHERE ip_address = $1 AND created_at >= $2`,
+		ipAddress, since,
+	).Scan(&n)
+	return n, err
+}
+
+func (q *Queries) DeleteBookingCreateAttempt(ctx context.Context, id int32) error {
+	_, err := q.pool.Exec(ctx, `DELETE FROM booking_create_attempts WHERE id = $1`, id)
+	return err
+}
+
+// DeleteRateLimitRecordsBefore prunes login and booking rate-limit attempts older than before.
+func (q *Queries) DeleteRateLimitRecordsBefore(ctx context.Context, before time.Time) error {
+	if _, err := q.pool.Exec(ctx, `DELETE FROM login_attempts WHERE created_at < $1`, before); err != nil {
+		return err
+	}
+	if _, err := q.pool.Exec(ctx, `DELETE FROM booking_prepare_attempts WHERE created_at < $1`, before); err != nil {
+		return err
+	}
+	_, err := q.pool.Exec(ctx, `DELETE FROM booking_create_attempts WHERE created_at < $1`, before)
+	return err
 }
 
 // ----- Insights -----

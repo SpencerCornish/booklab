@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"os"
 	"sync"
@@ -53,7 +54,7 @@ func TestAutoCharge_completed_concurrentOnlyOneCharge(t *testing.T) {
 	t.Cleanup(func() { pool.Close() })
 
 	q := db.New(pool)
-	if _, err := pool.Exec(ctx, `TRUNCATE login_attempts, admin_sessions, admin_users, bookings, closures RESTART IDENTITY CASCADE`); err != nil {
+	if _, err := pool.Exec(ctx, `TRUNCATE login_attempts, booking_prepare_attempts, booking_create_attempts, admin_sessions, admin_users, bookings, closures RESTART IDENTITY CASCADE`); err != nil {
 		t.Fatal(err)
 	}
 	resetSettingsUTC(t, ctx, q)
@@ -99,5 +100,54 @@ func TestAutoCharge_completed_concurrentOnlyOneCharge(t *testing.T) {
 	}
 	if nb.Status != db.BookingStatusCharged {
 		t.Fatalf("booking status = %s, want charged", nb.Status)
+	}
+}
+
+// An auto-charge whose outcome is unknown must be retried with the same idempotency key,
+// so a charge that actually went through is replayed by Stripe rather than taken twice.
+func TestAutoCharge_unknownOutcomeRetryReusesKey(t *testing.T) {
+	dsn := testDSN()
+	if dsn == "" {
+		t.Skip("set TEST_DATABASE_URL to run integration tests")
+	}
+	ctx := context.Background()
+	pool, err := db.Connect(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { pool.Close() })
+
+	q := db.New(pool)
+	if _, err := pool.Exec(ctx, `TRUNCATE login_attempts, booking_prepare_attempts, booking_create_attempts, admin_sessions, admin_users, bookings, closures RESTART IDENTITY CASCADE`); err != nil {
+		t.Fatal(err)
+	}
+	resetSettingsUTC(t, ctx, q)
+
+	start := time.Date(2032, 4, 1, 12, 0, 0, 0, time.UTC)
+	b, err := q.CreateBooking(ctx, "Sam", "sam@example.com", nil, start, start.Add(2*time.Hour), "si_sched_retry", "pm_sched_2", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := q.UpdateBookingStatus(ctx, b.ID, db.BookingStatusCompleted); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE bookings SET completed_at = NOW() - INTERVAL '30 hours' WHERE id = $1`, b.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	st := stripetest.NewScripted(errors.New("read tcp: connection reset by peer"), nil)
+	emailSvc := emailsvc.New("127.0.0.1", 1025, "", "", "sched@localhost", slog.New(slog.DiscardHandler))
+	s := New(q, emailSvc, st, "http://127.0.0.1:8080", slog.New(slog.DiscardHandler))
+	settings, err := q.GetSettings(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// The failed attempt puts the booking back and the same run claims it again.
+	if got := s.autoChargeCompleted(ctx, settings); got != 1 {
+		t.Fatalf("charged %d, want 1", got)
+	}
+	if keys := st.Keys(); len(keys) != 2 || keys[0] != keys[1] {
+		t.Fatalf("idempotency keys %q, want the same key twice", keys)
 	}
 }
