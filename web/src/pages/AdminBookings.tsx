@@ -212,6 +212,11 @@ function BookingStatusBadges({ booking }: { booking: BookingAdmin }) {
           reminder sent
         </span>
       )}
+      {booking.is_new_user === true && (
+        <span className="inline-block px-2 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-700">
+          new customer
+        </span>
+      )}
     </div>
   )
 }
@@ -395,6 +400,14 @@ function BookingDetailPanel({
               <p key={k}><span className="text-gray-400 mr-1">{k}</span>{v}</p>
             ))}
           </div>
+        </div>
+      )}
+      {booking.is_new_user != null && (
+        <div>
+          <p className="font-medium text-gray-500 uppercase tracking-wide mb-1">Pre-booking answer</p>
+          <p className="text-gray-600">
+            {booking.is_new_user ? 'New customer (self-reported)' : 'Returning customer (self-reported)'}
+          </p>
         </div>
       )}
     </div>

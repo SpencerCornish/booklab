@@ -37,11 +37,17 @@ export function TimeSlotPicker({ slots, selectedStart, selectedEnd, minHours, ma
       return
     }
 
-    // Check all slots between start and click are available
+    // Check all slots between start and click are available and contiguous in time
     const range = slots.slice(startIdx, clickIdx + 1)
     const hours = range.length
     if (hours < minHours || hours > maxHours) return
     if (!range.every((s) => s.available)) return
+    // Slots from separate trainer windows are adjacent in the array but not in
+    // time, so a selection cannot span a gap.
+    const contiguous = range.every(
+      (slot, i) => i === 0 || new Date(slot.start).getTime() === new Date(range[i - 1].end).getTime(),
+    )
+    if (!contiguous) return
 
     onSelect(selectedStart, slot.end)
   }
