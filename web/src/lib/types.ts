@@ -6,6 +6,21 @@ export interface NewCustomerRestriction {
   message: string
 }
 
+export interface NewUserGate {
+  enabled: boolean
+  question: string
+}
+
+export interface NewUserWindow {
+  weekday: number // 0 = Sunday … 6 = Saturday
+  start: string // HH:MM
+  end: string // HH:MM
+}
+
+export interface NewUserGateAdmin extends NewUserGate {
+  schedule: NewUserWindow[]
+}
+
 export interface PublicSettings {
   resource_name: string
   hourly_rate_cents: number
@@ -18,6 +33,7 @@ export interface PublicSettings {
   timezone: string
   referral_sources: string[]
   new_customer_restriction?: NewCustomerRestriction | null
+  new_user_gate?: NewUserGate | null
 }
 
 export interface Settings extends PublicSettings {
@@ -26,6 +42,7 @@ export interface Settings extends PublicSettings {
   auto_charge_delay_minutes: number
   terms_content: string
   privacy_content: string
+  new_user_gate: NewUserGateAdmin | null
 }
 
 export interface ReferralSourceCount {
@@ -65,6 +82,10 @@ export interface AvailabilityResponse {
   slots: TimeSlot[]
 }
 
+export interface AvailableDatesResponse {
+  available_dates: string[]
+}
+
 export interface BookingPublic {
   id: number
   name: string
@@ -88,6 +109,7 @@ export interface BookingAdmin extends BookingPublic {
   updated_at?: string
   charge_attempts?: number
   last_charge_error?: string
+  is_new_user?: boolean | null
 }
 
 export interface PrepareBookingResponse {

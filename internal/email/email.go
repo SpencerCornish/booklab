@@ -103,6 +103,7 @@ type StaffNewBookingData struct {
 	EndTime           time.Time
 	IsReturnCustomer  bool
 	PriorBookingCount int64
+	NewUserLabel      string // e.g. "New user (self-reported)"; empty when the gate is off
 	AdminURL          string
 	Timezone          string
 }

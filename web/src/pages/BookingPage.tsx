@@ -8,6 +8,7 @@ import { Footer } from '../components/Footer'
 import {
   getPublicSettings,
   getAvailability,
+  getAvailableDates,
   prepareBooking,
   createBooking,
   ApiError,
@@ -155,15 +156,61 @@ function BookingForm({ settings }: { settings: PublicSettings }) {
   const [success, setSuccess] = useState<BookingPublic | null>(null)
   const submittingRef = useRef(false)
 
+  // Self-reported answer to the optional pre-schedule question. null = unanswered.
+  const [isNewUser, setIsNewUser] = useState<boolean | null>(null)
+  const gate = settings.new_user_gate ?? null
+  const gateEnabled = !!gate
+  const answered = !gateEnabled || isNewUser !== null
+  const stepOffset = gateEnabled ? 1 : 0
+
   useEffect(() => {
+    if (!answered) return
+    let cancelled = false
     setLoadingSlots(true)
+    setAvailability(null)
     setSelectedStart(null)
     setSelectedEnd(null)
-    getAvailability(date)
-      .then(setAvailability)
+    getAvailability(date, gateEnabled ? isNewUser === true : undefined)
+      .then((data) => {
+        if (!cancelled) setAvailability(data)
+      })
+      .catch((err) => {
+        if (!cancelled) console.error(err)
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingSlots(false)
+      })
+    // A date or answer change can start another request before this one finishes.
+    return () => {
+      cancelled = true
+    }
+  }, [date, isNewUser, gateEnabled, answered])
+
+  // Which upcoming days have any bookable time, so the date strip can grey out
+  // the rest. Refetched when the answer (and thus the hours that apply) changes.
+  const [availableDates, setAvailableDates] = useState<Set<string> | undefined>(undefined)
+  useEffect(() => {
+    if (!answered) return
+    setAvailableDates(undefined)
+    let cancelled = false
+    getAvailableDates(60, gateEnabled ? isNewUser === true : undefined)
+      .then((d) => {
+        if (!cancelled) setAvailableDates(new Set(d.available_dates))
+      })
       .catch(console.error)
-      .finally(() => setLoadingSlots(false))
-  }, [date])
+    return () => {
+      cancelled = true
+    }
+  }, [isNewUser, gateEnabled, answered])
+
+  // Land on the first bookable day instead of a default that may be greyed out.
+  // The backend returns dates ascending, so the set's first value is the earliest.
+  useEffect(() => {
+    if (!availableDates || availableDates.size === 0) return
+    if (availableDates.has(date)) return
+    const first = availableDates.values().next().value
+    if (first) setDate(first)
+  }, [availableDates, date])
 
   // Dates are YYYY-MM-DD in the booking timezone, so string comparison is a date comparison.
   const restriction = settings.new_customer_restriction
@@ -176,7 +223,7 @@ function BookingForm({ settings }: { settings: PublicSettings }) {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!stripe || !elements || !selectedStart || !selectedEnd) return
+    if (!stripe || !elements || !selectedStart || !selectedEnd || !answered) return
     if (submittingRef.current) return
 
     submittingRef.current = true
@@ -194,10 +241,12 @@ function BookingForm({ settings }: { settings: PublicSettings }) {
         }
       }
 
+      const newUserParam = gateEnabled ? isNewUser === true : undefined
       const { setup_intent_client_secret, setup_intent_id } = await prepareBooking({
         email,
         start_time: selectedStart,
         end_time: selectedEnd,
+        new_user: newUserParam,
       })
 
       const cardElement = elements.getElement(CardElement)
@@ -219,6 +268,7 @@ function BookingForm({ settings }: { settings: PublicSettings }) {
         metadata,
         start_time: selectedStart,
         end_time: selectedEnd,
+        new_user: newUserParam,
       })
 
       setSuccess(booking)
@@ -257,56 +307,119 @@ function BookingForm({ settings }: { settings: PublicSettings }) {
 
   return (
     <form onSubmit={handleSubmit} className="max-w-2xl mx-auto px-4 py-8 space-y-8">
+      {/* Pre-schedule question (optional) */}
+      {gate && (
+        <section>
+          <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">
+            1. Before you book
+          </h2>
+          <div className="bg-white rounded-2xl border border-gray-200 p-6">
+            <fieldset>
+              <legend className="text-sm font-medium text-gray-900">{gate.question}</legend>
+              <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <label
+                  className={`flex items-center gap-2 rounded-lg border px-3 py-2.5 text-sm cursor-pointer transition-colors ${
+                    isNewUser === false
+                      ? 'border-blue-500 bg-blue-50 text-blue-900'
+                      : 'border-gray-200 text-gray-700 hover:border-blue-300'
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="new-user"
+                    checked={isNewUser === false}
+                    onChange={() => setIsNewUser(false)}
+                    className="text-blue-600 focus:ring-blue-500"
+                  />
+                  <span>Yes, I've used it before</span>
+                </label>
+                <label
+                  className={`flex items-center gap-2 rounded-lg border px-3 py-2.5 text-sm cursor-pointer transition-colors ${
+                    isNewUser === true
+                      ? 'border-blue-500 bg-blue-50 text-blue-900'
+                      : 'border-gray-200 text-gray-700 hover:border-blue-300'
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="new-user"
+                    checked={isNewUser === true}
+                    onChange={() => setIsNewUser(true)}
+                    className="text-blue-600 focus:ring-blue-500"
+                  />
+                  <span>No, I'm new</span>
+                </label>
+              </div>
+            </fieldset>
+            {isNewUser === null ? (
+              <p className="mt-3 text-xs text-gray-400">Answer to see available times.</p>
+            ) : isNewUser ? (
+              <p className="mt-3 text-sm text-blue-700">
+                New customers book during trainer hours — the available times below reflect that.
+              </p>
+            ) : null}
+          </div>
+        </section>
+      )}
+
       {/* Date selection */}
-      <section>
-        <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">
-          1. Choose a date
-        </h2>
-        <DatePicker selected={date} onChange={setDate} />
-      </section>
+      {answered && (
+        <section>
+          <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">
+            {stepOffset + 1}. Choose a date
+          </h2>
+          <DatePicker selected={date} onChange={setDate} availableDates={availableDates} />
+        </section>
+      )}
 
       {/* Time slot selection */}
-      <section>
-        <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">
-          2. Choose a time
-        </h2>
-        {settings.min_lead_hours > 0 && (
-          <p className="text-sm text-gray-500 mb-3">
-            Bookings must be made at least {settings.min_lead_hours} {settings.min_lead_hours === 1 ? 'hour' : 'hours'} in advance.
-          </p>
-        )}
-        {loadingSlots ? (
-          <div className="flex items-center gap-2 text-gray-400 py-4">
-            <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-gray-400" />
-            <span className="text-sm">Loading availability…</span>
-          </div>
-        ) : availability?.is_closed ? (
-          <div className="rounded-xl bg-amber-50 border border-amber-200 px-4 py-3 text-amber-800 text-sm">
-            This date is closed{availability.closure_reason ? `: ${availability.closure_reason}` : ''}.
-          </div>
-        ) : (
-          <>
-            {dateRestricted && (
-              <div className="rounded-xl bg-amber-50 border border-amber-200 px-4 py-3 text-amber-800 text-sm mb-3">
-                <p className="font-medium">Returning customers only on this date</p>
-                <p className="mt-0.5">{restriction.message}</p>
-              </div>
-            )}
-            <TimeSlotPicker
-              slots={availability?.slots ?? []}
-              selectedStart={selectedStart}
-              selectedEnd={selectedEnd}
-              minHours={settings.min_hours}
-              maxHours={settings.max_hours}
-              onSelect={handleSlotSelect}
-              onClear={() => { setSelectedStart(null); setSelectedEnd(null) }}
-            />
-          </>
-        )}
-      </section>
+      {answered && (
+        <section>
+          <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">
+            {stepOffset + 2}. Choose a time
+          </h2>
+          {settings.min_lead_hours > 0 && (
+            <p className="text-sm text-gray-500 mb-3">
+              Bookings must be made at least {settings.min_lead_hours} {settings.min_lead_hours === 1 ? 'hour' : 'hours'} in advance.
+            </p>
+          )}
+          {loadingSlots ? (
+            <div className="flex items-center gap-2 text-gray-400 py-4">
+              <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-gray-400" />
+              <span className="text-sm">Loading availability…</span>
+            </div>
+          ) : availability?.is_closed ? (
+            <div className="rounded-xl bg-amber-50 border border-amber-200 px-4 py-3 text-amber-800 text-sm">
+              This date is closed{availability.closure_reason ? `: ${availability.closure_reason}` : ''}.
+            </div>
+          ) : isNewUser === true && availability && availability.slots.length === 0 ? (
+            <div className="rounded-xl bg-amber-50 border border-amber-200 px-4 py-3 text-amber-800 text-sm">
+              No trainer availability on this date. Try another day.
+            </div>
+          ) : (
+            <>
+              {dateRestricted && (
+                <div className="rounded-xl bg-amber-50 border border-amber-200 px-4 py-3 text-amber-800 text-sm mb-3">
+                  <p className="font-medium">Returning customers only on this date</p>
+                  <p className="mt-0.5">{restriction.message}</p>
+                </div>
+              )}
+              <TimeSlotPicker
+                slots={availability?.slots ?? []}
+                selectedStart={selectedStart}
+                selectedEnd={selectedEnd}
+                minHours={settings.min_hours}
+                maxHours={settings.max_hours}
+                onSelect={handleSlotSelect}
+                onClear={() => { setSelectedStart(null); setSelectedEnd(null) }}
+              />
+            </>
+          )}
+        </section>
+      )}
 
       {/* Estimated total */}
-      {selectedStart && selectedEnd && (() => {
+      {answered && selectedStart && selectedEnd && (() => {
         const hours = Math.max(1, Math.round(
           (new Date(selectedEnd).getTime() - new Date(selectedStart).getTime()) / 3600000
         ))
@@ -322,10 +435,10 @@ function BookingForm({ settings }: { settings: PublicSettings }) {
       })()}
 
       {/* Booking details */}
-      {selectedStart && selectedEnd && (
+      {answered && selectedStart && selectedEnd && (
         <section>
           <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">
-            3. Your details
+            {stepOffset + 3}. Your details
           </h2>
           <div className="bg-white rounded-2xl border border-gray-200 p-6 space-y-4">
             <div>

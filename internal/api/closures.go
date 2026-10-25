@@ -39,6 +39,9 @@ func slotOverlapsPartialClosure(slotStart, slotEnd time.Time, c *db.Closure, loc
 		return false
 	}
 	d := slotStart.In(loc)
+	if !dateInClosureRange(dateOnly(d, loc), c, loc) {
+		return false
+	}
 	sh, sm, _ := c.StartTime.Clock()
 	eh, em, _ := c.EndTime.Clock()
 	cStart := time.Date(d.Year(), d.Month(), d.Day(), sh, sm, 0, 0, loc)

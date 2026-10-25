@@ -53,7 +53,7 @@ func TestValidateBookingCreate_rejectsPastStart(t *testing.T) {
 	}
 	start := time.Now().Add(-3 * time.Hour)
 	end := start.Add(2 * time.Hour)
-	bad, err := s.validateBookingCreate(ctx, start, end, settings)
+	bad, err := s.validateBookingCreate(ctx, start, end, settings, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,7 +66,7 @@ func TestValidateBookingCreate_rejectsInsideMinLeadTime(t *testing.T) {
 	s := &Server{cfg: testConfig(), logger: testLogger()}
 	settings := &db.Settings{Timezone: "UTC", MinHours: 1, MaxHours: 8, MinLeadHours: 24}
 	start := time.Now().Add(23 * time.Hour)
-	bad, err := s.validateBookingCreate(context.Background(), start, start.Add(2*time.Hour), settings)
+	bad, err := s.validateBookingCreate(context.Background(), start, start.Add(2*time.Hour), settings, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,7 +96,7 @@ func TestValidateBookingCreate_allowsBeyondMinLeadTime(t *testing.T) {
 
 	s := &Server{queries: q, cfg: testConfig(), logger: testLogger()}
 	start := time.Date(2035, 7, 11, 11, 0, 0, 0, time.UTC)
-	bad, err := s.validateBookingCreate(ctx, start, start.Add(2*time.Hour), settings)
+	bad, err := s.validateBookingCreate(ctx, start, start.Add(2*time.Hour), settings, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -119,7 +119,7 @@ func TestValidateBookingCreate_rejectsOutsideBookableHours(t *testing.T) {
 	// Window 10:00–16:00 UTC; 08:00–10:00 is two hours (meets min) but starts before window.
 	start := time.Date(2035, 7, 10, 8, 0, 0, 0, time.UTC)
 	end := time.Date(2035, 7, 10, 10, 0, 0, 0, time.UTC)
-	bad, err := s.validateBookingCreate(ctx, start, end, settings)
+	bad, err := s.validateBookingCreate(ctx, start, end, settings, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -141,7 +141,7 @@ func TestValidateBookingCreate_rejectsUnderMinDuration(t *testing.T) {
 	}
 	start := time.Date(2035, 7, 11, 11, 0, 0, 0, time.UTC)
 	end := start.Add(time.Hour) // 1 hour < min_hours 2
-	bad, err := s.validateBookingCreate(ctx, start, end, settings)
+	bad, err := s.validateBookingCreate(ctx, start, end, settings, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -177,7 +177,7 @@ func TestValidateBookingCreate_rejectsOverMaxDuration(t *testing.T) {
 	s := &Server{queries: q, cfg: testConfig(), logger: testLogger()}
 	start := time.Date(2035, 7, 12, 11, 0, 0, 0, time.UTC)
 	end := start.Add(4 * time.Hour)
-	bad, err := s.validateBookingCreate(ctx, start, end, settings)
+	bad, err := s.validateBookingCreate(ctx, start, end, settings, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -205,7 +205,7 @@ func TestValidateBookingCreate_rejectsClosureOverlap(t *testing.T) {
 	}
 	start := time.Date(2035, 8, 15, 11, 0, 0, 0, time.UTC)
 	end := start.Add(2 * time.Hour)
-	bad, err := s.validateBookingCreate(ctx, start, end, settings)
+	bad, err := s.validateBookingCreate(ctx, start, end, settings, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -434,7 +434,7 @@ func TestNewCustomerRestriction_confirmedFutureBookingDoesNotCount(t *testing.T)
 
 	// A confirmed booking on a far-off date must not unlock the window.
 	far := time.Date(2035, 8, 1, 12, 0, 0, 0, time.UTC)
-	if _, err := q.CreateBooking(ctx, "Pat", "pat@example.com", nil, far, far.Add(2*time.Hour), "si_future", "pm_test_123"); err != nil {
+	if _, err := q.CreateBooking(ctx, "Pat", "pat@example.com", nil, far, far.Add(2*time.Hour), "si_future", "pm_test_123", nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -455,7 +455,7 @@ func TestNewCustomerRestriction_returningCustomerAllowed(t *testing.T) {
 
 	// Email match ignores case and surrounding whitespace; a completed booking in the past unlocks the window.
 	past := time.Date(2031, 3, 1, 12, 0, 0, 0, time.UTC)
-	b, err := q.CreateBooking(ctx, "Pat", " Pat@Example.com ", nil, past, past.Add(2*time.Hour), "si_past", "pm_test_123")
+	b, err := q.CreateBooking(ctx, "Pat", " Pat@Example.com ", nil, past, past.Add(2*time.Hour), "si_past", "pm_test_123", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -487,7 +487,7 @@ func TestNewCustomerRestriction_historyStatusesCountAsReturning(t *testing.T) {
 	for i, st := range []db.BookingStatus{"charging", "charged"} {
 		past := time.Date(2031, 3, 1+i, 12, 0, 0, 0, time.UTC)
 		email := fmt.Sprintf("returning%d@example.com", i)
-		b, err := q.CreateBooking(ctx, "Pat", email, nil, past, past.Add(2*time.Hour), fmt.Sprintf("si_hist_%d", i), "pm_test_123")
+		b, err := q.CreateBooking(ctx, "Pat", email, nil, past, past.Add(2*time.Hour), fmt.Sprintf("si_hist_%d", i), "pm_test_123", nil)
 		if err != nil {
 			t.Fatal(err)
 		}

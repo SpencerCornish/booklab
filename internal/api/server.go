@@ -78,6 +78,7 @@ func (s *Server) Handler() http.Handler {
 		r.Get("/terms", s.handleGetTerms)
 		r.Get("/privacy", s.handleGetPrivacy)
 		r.Get("/availability", s.handleGetAvailability)
+		r.Get("/availability/days", s.handleGetAvailableDays)
 		r.Post("/bookings/prepare", s.handlePrepareBooking)
 		r.Post("/bookings", s.handleCreateBooking)
 		r.Get("/bookings/{token}", s.handleGetBooking)
