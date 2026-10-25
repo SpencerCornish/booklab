@@ -156,9 +156,12 @@ currently does. These suites guard against that in four ways:
 
 ---
 
-## Flagged for your review ⚑
+## Judgment calls — reviewed and approved by the repo owner (2025-10-25) ✓
 
-These are the lines where I chose an interpretation — read these first:
+These are the lines where the contract was ambiguous and an interpretation was
+chosen. All seven were reviewed by the repo owner and accepted as the contract;
+they are now authoritative, not provisional. (#2 was flagged as likely-wrong
+behavior and was fixed in this branch instead.)
 
 1. **`prepare` on a taken slot → 409.** I initially wrote the test expecting 200 and corrected the *test* after observing the design (prepare validates availability up-front so the Stripe handoff never happens for dead slots). If you'd rather have prepare always 200, that's a product decision to make consciously.
 2. ~~`?status=bogus` → 500~~ **Fixed**: invalid status input (list filter and PATCH) is now a 400 via `validBookingStatuses`.

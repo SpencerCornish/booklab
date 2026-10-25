@@ -29,6 +29,7 @@ export
 # ── Functional tests ─────────────────────────────────────────────────────────
 FUNCTEST_COMPOSE_FILE := tests/compose/docker-compose.test.yml
 FUNCTEST_PROJECT      := booklab-functest
+FUNCTEST_COMPOSE      := docker compose -f $(FUNCTEST_COMPOSE_FILE) -p $(FUNCTEST_PROJECT)
 HURL                  ?= hurl
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -141,14 +142,14 @@ test: ## Run Go tests
 
 stack-up: ## Start the functional-test stack (Postgres :5433 + Mailpit :8027)
 	@echo "$(CYAN)Starting functional-test stack...$(RESET)"
-	@docker compose -f $(FUNCTEST_COMPOSE_FILE) -p $(FUNCTEST_PROJECT) up -d --wait
+	@$(FUNCTEST_COMPOSE) up -d --wait
 	@echo "$(CYAN)Mailpit UI → http://localhost:8027$(RESET)"
 
 stack-down: ## Stop the functional-test stack (keeps volumes for fast re-runs)
-	@docker compose -f $(FUNCTEST_COMPOSE_FILE) -p $(FUNCTEST_PROJECT) down
+	@$(FUNCTEST_COMPOSE) down
 
 stack-nuke: ## Stop the functional-test stack AND delete its volumes
-	@docker compose -f $(FUNCTEST_COMPOSE_FILE) -p $(FUNCTEST_PROJECT) down -v
+	@$(FUNCTEST_COMPOSE) down -v
 
 reset-db: ## Reset the functional-test database (between-suite state)
 	@./tests/scripts/reset-db.sh
