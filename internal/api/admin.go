@@ -568,6 +568,7 @@ func (s *Server) handleAdminUpdateSettings(w http.ResponseWriter, r *http.Reques
 		MaxHours               *int32    `json:"max_hours"`
 		ReminderHoursBefore    *int32    `json:"reminder_hours_before"`
 		MinLeadHours           *int32    `json:"min_lead_hours"`
+		DisplayRefreshMinutes  *int32    `json:"display_refresh_minutes"`
 		NotificationEmails     *string   `json:"notification_emails"`
 		AutoChargeDelayMinutes *int32    `json:"auto_charge_delay_minutes"`
 		ReferralSources        *[]string `json:"referral_sources"`
@@ -590,6 +591,7 @@ func (s *Server) handleAdminUpdateSettings(w http.ResponseWriter, r *http.Reques
 		MaxHours:               req.MaxHours,
 		ReminderHoursBefore:    req.ReminderHoursBefore,
 		MinLeadHours:           req.MinLeadHours,
+		DisplayRefreshMinutes:  req.DisplayRefreshMinutes,
 		NotificationEmails:     req.NotificationEmails,
 		AutoChargeDelayMinutes: req.AutoChargeDelayMinutes,
 		ReferralSources:        req.ReferralSources,
@@ -597,6 +599,10 @@ func (s *Server) handleAdminUpdateSettings(w http.ResponseWriter, r *http.Reques
 		PrivacyContent:         req.PrivacyContent,
 	}
 
+	if req.DisplayRefreshMinutes != nil && (*req.DisplayRefreshMinutes < 1 || *req.DisplayRefreshMinutes > 60) {
+		s.writeError(w, r, http.StatusBadRequest, "display_refresh_minutes must be between 1 and 60", nil)
+		return
+	}
 	if req.MinLeadHours != nil && *req.MinLeadHours < 0 {
 		s.writeError(w, r, http.StatusBadRequest, "min_lead_hours cannot be negative", nil)
 		return
@@ -774,6 +780,7 @@ func settingsToMap(s *db.Settings) map[string]any {
 		"privacy_content":           s.PrivacyContent,
 		"new_customer_restriction":  newCustomerRestrictionToMap(s),
 		"new_user_gate":             newUserGateToMap(s),
+		"display_refresh_minutes":   s.DisplayRefreshMinutes,
 	}
 }
 

@@ -9,6 +9,7 @@ A self-hosted hourly resource booking system with post-use Stripe billing. Built
 - **Admin panel** - bookings list, charge flow, closure management, settings editor
 - **New-user gate (optional)** - a pre-schedule question routes self-reported new customers to trainer-only weekly hours; the date picker greys out days with no matching availability
 - **Email notifications** - confirmation, reminder, cancellation, receipt (SMTP)
+- **E-ink door sign (optional)** - drives a TRMNL-firmware e-ink display (e.g. the Seeed TRMNL 7.5" DIY kit) showing live room status and today's schedule; BookLab is the display's server, no cloud account needed. See [docs/eink-display.md](docs/eink-display.md)
 - **DB-level conflict prevention** - PostgreSQL exclusion constraint prevents double-bookings
 - **Configurable** - all branding via env vars, suitable for any resource
 
@@ -60,7 +61,8 @@ Browser → Go server (:8080)
               ├── Serves React SPA (embedded via embed.FS)
               ├── /api/* → REST handlers
               │       ├── Public: availability, create/cancel/view booking
-              │       └── Admin: bookings, charge, closures, settings
+              │       ├── Admin: bookings, charge, closures, displays, settings
+              │       └── Door-sign displays: TRMNL firmware protocol (setup, poll, image)
               ├── PostgreSQL (migrations run on startup)
               ├── Stripe API (SetupIntent + PaymentIntent)
               └── SMTP (confirmation, reminder, cancellation, receipt)

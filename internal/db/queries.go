@@ -31,7 +31,8 @@ func (q *Queries) GetSettings(ctx context.Context) (*Settings, error) {
 		bookable_start, bookable_end, min_hours, max_hours, reminder_hours_before, notification_emails,
 		auto_charge_delay_minutes, referral_sources, terms_content, privacy_content,
 		new_customer_block_start, new_customer_block_end, new_customer_block_message, min_lead_hours,
-		new_user_gate_enabled, new_user_gate_question, new_user_gate_schedule
+		new_user_gate_enabled, new_user_gate_question, new_user_gate_schedule,
+		display_refresh_minutes
 		FROM settings WHERE id = 1`)
 	return scanSettings(row)
 }
@@ -61,6 +62,7 @@ type UpdateSettingsParams struct {
 	NewUserGateEnabled      *bool
 	NewUserGateQuestion     *string
 	NewUserGateSchedule     *[]NewUserWindow
+	DisplayRefreshMinutes   *int32
 }
 
 func (q *Queries) UpdateSettings(ctx context.Context, p UpdateSettingsParams) (*Settings, error) {
@@ -90,14 +92,16 @@ func (q *Queries) UpdateSettings(ctx context.Context, p UpdateSettingsParams) (*
 			min_lead_hours              = COALESCE($19, min_lead_hours),
 			new_user_gate_enabled       = COALESCE($20, new_user_gate_enabled),
 			new_user_gate_question      = COALESCE($21, new_user_gate_question),
-			new_user_gate_schedule      = COALESCE(($22::text)::jsonb, new_user_gate_schedule)
+			new_user_gate_schedule      = COALESCE(($22::text)::jsonb, new_user_gate_schedule),
+			display_refresh_minutes     = COALESCE($23, display_refresh_minutes)
 		WHERE id = 1
 		RETURNING id, resource_name, hourly_rate_cents, currency, timezone,
 			bookable_start, bookable_end, min_hours, max_hours, reminder_hours_before,
 			notification_emails, auto_charge_delay_minutes, referral_sources,
 			terms_content, privacy_content,
 			new_customer_block_start, new_customer_block_end, new_customer_block_message, min_lead_hours,
-			new_user_gate_enabled, new_user_gate_question, new_user_gate_schedule`,
+			new_user_gate_enabled, new_user_gate_question, new_user_gate_schedule,
+			display_refresh_minutes`,
 		p.ResourceName, p.HourlyRateCents, p.Currency, p.Timezone,
 		p.BookableStart, p.BookableEnd, p.MinHours, p.MaxHours, p.ReminderHoursBefore,
 		p.NotificationEmails, p.AutoChargeDelayMinutes, p.ReferralSources,
@@ -105,6 +109,7 @@ func (q *Queries) UpdateSettings(ctx context.Context, p UpdateSettingsParams) (*
 		p.NewCustomerBlockSet, p.NewCustomerBlockStart, p.NewCustomerBlockEnd, p.NewCustomerBlockMessage,
 		p.MinLeadHours,
 		p.NewUserGateEnabled, p.NewUserGateQuestion, scheduleParam,
+		p.DisplayRefreshMinutes,
 	)
 	return scanSettings(row)
 }
@@ -139,6 +144,7 @@ func scanSettings(row pgx.Row) (*Settings, error) {
 		&s.NewCustomerBlockStart, &s.NewCustomerBlockEnd, &s.NewCustomerBlockMessage,
 		&s.MinLeadHours,
 		&s.NewUserGateEnabled, &s.NewUserGateQuestion, &scheduleRaw,
+		&s.DisplayRefreshMinutes,
 	)
 	if err != nil {
 		return nil, err

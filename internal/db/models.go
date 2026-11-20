@@ -84,6 +84,7 @@ type Settings struct {
 	NewUserGateEnabled      bool            `json:"new_user_gate_enabled"`
 	NewUserGateQuestion     string          `json:"new_user_gate_question"`
 	NewUserGateSchedule     []NewUserWindow `json:"new_user_gate_schedule"`
+	DisplayRefreshMinutes   int32           `json:"display_refresh_minutes"`
 }
 
 type AdminUser struct {

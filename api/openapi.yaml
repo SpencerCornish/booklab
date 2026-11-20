@@ -15,6 +15,10 @@ tags:
     description: Public booking endpoints
   - name: admin
     description: Admin-only endpoints (session auth required)
+  - name: display
+    description: >
+      E-ink door-sign endpoints speaking the TRMNL firmware "bring your own server"
+      protocol. Called by devices, not browsers. See docs/eink-display.md.
 
 paths:
   /settings/public:
@@ -591,6 +595,212 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
+  /setup:
+    get:
+      tags: [display]
+      summary: Register a display (TRMNL setup)
+      description: >
+        Called once by the device firmware. Issues an API key; the display stays pending until
+        an admin approves it. Re-running setup for a known MAC issues a new key and returns the
+        display to pending. Revoked MACs, invalid MACs and setups beyond the pending-display cap
+        get 404, which the firmware shows as "not registered".
+      operationId: displaySetup
+      parameters:
+        - name: ID
+          in: header
+          required: true
+          description: Device MAC address.
+          schema:
+            type: string
+            example: "AA:BB:CC:DD:EE:FF"
+      responses:
+        "200":
+          description: Registered
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DisplaySetupResponse"
+        "404":
+          description: Not registered
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: integer
+                    enum: [404]
+                  message:
+                    type: string
+
+  /display:
+    get:
+      tags: [display]
+      summary: Poll for the current screen (TRMNL display)
+      description: >
+        Called on every wake. Always answers HTTP 200; the JSON `status` is 0 with an image, or
+        202 when the key is not recognised (the firmware then shows its friendly ID and polls
+        again soon). An unknown key from a MAC this server has never seen is registered as a
+        pending display. `filename` only changes when the image does, so the firmware can skip
+        redraws. `refresh_rate` is the number of seconds to sleep.
+      operationId: displayPoll
+      parameters:
+        - name: Access-Token
+          in: header
+          required: true
+          schema:
+            type: string
+        - name: ID
+          in: header
+          required: true
+          schema:
+            type: string
+        - name: Battery-Voltage
+          in: header
+          schema:
+            type: number
+        - name: RSSI
+          in: header
+          schema:
+            type: integer
+        - name: FW-Version
+          in: header
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Display instructions
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DisplayPollResponse"
+
+  /display/image/{token}/{file}:
+    get:
+      tags: [display]
+      summary: Fetch a display image
+      description: >
+        The 1-bit 800x480 PNG named by /display. The device fetches it without headers, so the
+        per-display token in the path is the credential; it rotates when a display is revoked
+        or returned to pending.
+      operationId: displayImage
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: file
+          in: path
+          required: true
+          schema:
+            type: string
+            example: 3f9a0c1d2e4b5a69.png
+      responses:
+        "200":
+          description: PNG image
+          content:
+            image/png:
+              schema:
+                type: string
+                format: binary
+        "404":
+          description: Unknown token
+
+  /log:
+    post:
+      tags: [display]
+      summary: Accept device logs (TRMNL log)
+      description: Accepted and discarded so devices do not retry.
+      operationId: displayLog
+      responses:
+        "204":
+          description: Accepted
+
+  /admin/displays:
+    get:
+      tags: [admin]
+      summary: List displays
+      operationId: adminListDisplays
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Display"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /admin/displays/preview.png:
+    get:
+      tags: [admin]
+      summary: Preview the door sign
+      description: Renders the screen an approved display would show right now.
+      operationId: adminPreviewDisplay
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: PNG image
+          content:
+            image/png:
+              schema:
+                type: string
+                format: binary
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /admin/displays/{id}:
+    patch:
+      tags: [admin]
+      summary: Rename, approve or revoke a display
+      operationId: adminUpdateDisplay
+      security:
+        - sessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/DisplayID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateDisplayRequest"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Display"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      tags: [admin]
+      summary: Delete a display
+      description: A deleted device that polls again with its old key is re-registered as pending.
+      operationId: adminDeleteDisplay
+      security:
+        - sessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/DisplayID"
+      responses:
+        "204":
+          description: Deleted
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
 components:
   securitySchemes:
     sessionCookie:
@@ -613,6 +823,12 @@ components:
       schema:
         type: integer
     ClosureID:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: integer
+    DisplayID:
       name: id
       in: path
       required: true
@@ -837,6 +1053,9 @@ components:
             new_user_gate:
               description: The gate configuration; schedule may be empty even while enabled.
               $ref: "#/components/schemas/NewUserGate"
+            display_refresh_minutes:
+              type: integer
+              description: How often door-sign displays refresh during bookable hours.
 
     LegalContent:
       type: object
@@ -889,6 +1108,10 @@ components:
         new_user_gate:
           description: Omit to leave the gate unchanged. Windows must not overlap on the same weekday; a blank question falls back to the default.
           $ref: "#/components/schemas/NewUserGate"
+        display_refresh_minutes:
+          type: integer
+          minimum: 1
+          maximum: 60
 
     AvailabilityResponse:
       type: object
@@ -1149,4 +1372,93 @@ components:
           type: string
           description: HH:MM, required when all_day is false
         reason:
+          type: string
+
+    DisplayStatus:
+      type: string
+      enum: [pending, approved, revoked]
+
+    Display:
+      type: object
+      properties:
+        id:
+          type: integer
+        mac_address:
+          type: string
+        friendly_id:
+          type: string
+          description: Six-character code the device shows while pending.
+        name:
+          type: string
+        status:
+          $ref: "#/components/schemas/DisplayStatus"
+        model:
+          type: string
+        firmware_version:
+          type: string
+        battery_voltage:
+          type: [number, "null"]
+        battery_low:
+          type: boolean
+        rssi:
+          type: [integer, "null"]
+        width:
+          type: [integer, "null"]
+        height:
+          type: [integer, "null"]
+        last_seen_at:
+          type: [string, "null"]
+          format: date-time
+        last_ip:
+          type: string
+        approved_at:
+          type: [string, "null"]
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+
+    UpdateDisplayRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          maxLength: 100
+        status:
+          $ref: "#/components/schemas/DisplayStatus"
+
+    DisplaySetupResponse:
+      type: object
+      properties:
+        status:
+          type: integer
+          enum: [200]
+        api_key:
+          type: string
+        friendly_id:
+          type: string
+        image_url:
+          type: string
+        message:
+          type: string
+
+    DisplayPollResponse:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: integer
+          enum: [0, 202]
+        image_url:
+          type: string
+        filename:
+          type: string
+        refresh_rate:
+          type: integer
+          description: Seconds until the next wake.
+        reset_firmware:
+          type: boolean
+        update_firmware:
+          type: boolean
+        firmware_url:
           type: string

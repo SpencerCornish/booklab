@@ -43,6 +43,7 @@ export interface Settings extends PublicSettings {
   terms_content: string
   privacy_content: string
   new_user_gate: NewUserGateAdmin | null
+  display_refresh_minutes: number
 }
 
 export interface ReferralSourceCount {
@@ -141,4 +142,25 @@ export interface AdminUser {
 export interface AdminUsersResponse {
   users: AdminUser[]
   current_username: string
+}
+
+export type DisplayStatus = 'pending' | 'approved' | 'revoked'
+
+export interface Display {
+  id: number
+  mac_address: string
+  friendly_id: string
+  name: string
+  status: DisplayStatus
+  model: string
+  firmware_version: string
+  battery_voltage: number | null
+  battery_low: boolean
+  rssi: number | null
+  width: number | null
+  height: number | null
+  last_seen_at: string | null
+  last_ip: string
+  approved_at: string | null
+  created_at: string
 }

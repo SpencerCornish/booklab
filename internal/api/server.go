@@ -28,6 +28,7 @@ type Server struct {
 	logger  *slog.Logger
 
 	trustedProxies []netip.Prefix
+	displayImages  displayImageCache
 }
 
 func New(cfg *config.Config, queries *db.Queries, stripe stripesvc.Client, email *emailsvc.Service, webFS fs.FS, log *slog.Logger) *Server {
@@ -96,6 +97,12 @@ func (s *Server) Handler() http.Handler {
 		r.Get("/bookings/{token}", s.handleGetBooking)
 		r.Post("/bookings/{token}/cancel", s.handleCancelBooking)
 
+		// E-ink door-sign displays (TRMNL firmware protocol; see docs/eink-display.md)
+		r.Get("/setup", s.handleDisplaySetup)
+		r.Get("/display", s.handleDisplayPoll)
+		r.Get("/display/image/{token}/{file}", s.handleDisplayImage)
+		r.Post("/log", s.handleDisplayLog)
+
 		// Admin
 		r.Post("/admin/login", s.handleAdminLogin)
 		r.Post("/admin/logout", s.handleAdminLogout)
@@ -116,6 +123,10 @@ func (s *Server) Handler() http.Handler {
 			r.Post("/admin/closures", s.handleAdminCreateClosure)
 			r.Put("/admin/closures/{id}", s.handleAdminUpdateClosure)
 			r.Delete("/admin/closures/{id}", s.handleAdminDeleteClosure)
+			r.Get("/admin/displays", s.handleAdminListDisplays)
+			r.Get("/admin/displays/preview.png", s.handleAdminDisplayPreview)
+			r.Patch("/admin/displays/{id}", s.handleAdminUpdateDisplay)
+			r.Delete("/admin/displays/{id}", s.handleAdminDeleteDisplay)
 		})
 	})
 
