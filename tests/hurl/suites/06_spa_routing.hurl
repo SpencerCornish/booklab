@@ -31,6 +31,12 @@ HTTP 200
 GET {{base_url}}/booking/some-token
 HTTP 200
 
+# The secret-link route is a client route too (deep links must not 404).
+GET {{base_url}}/book/abc123token
+HTTP 200
+[Asserts]
+header "Content-Type" contains "text/html"
+
 GET {{base_url}}/cancel/some-token
 HTTP 200
 

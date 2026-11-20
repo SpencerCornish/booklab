@@ -69,6 +69,89 @@ HTTP 200
 [Asserts]
 jsonpath "$.new_customer_restriction" == null
 
+# ── Secret studio link ───────────────────────────────────────────────────────
+# First enable bootstraps a 64-hex token; the admin payload exposes it, the
+# public payload must never mention it.
+PUT {{base_url}}/api/admin/settings
+X-CSRF-Token: {{csrf}}
+{"secret_link": {"enabled": true, "allow_outside_hours": false}}
+HTTP 200
+[Captures]
+link_token: jsonpath "$.secret_link.token"
+link_url: jsonpath "$.secret_link.url"
+[Asserts]
+jsonpath "$.secret_link.enabled" == true
+jsonpath "$.secret_link.allow_outside_hours" == false
+jsonpath "$.secret_link.token" matches /^[0-9a-f]{64}$/
+jsonpath "$.secret_link.url" contains "/book/"
+
+GET {{base_url}}/api/admin/settings
+HTTP 200
+[Asserts]
+jsonpath "$.secret_link.enabled" == true
+jsonpath "$.secret_link.token" == "{{link_token}}"
+
+GET {{base_url}}/api/settings/public
+HTTP 200
+[Asserts]
+body not contains "secret_link"
+
+# Toggling the 24/7 flag round-trips without touching the token.
+PUT {{base_url}}/api/admin/settings
+X-CSRF-Token: {{csrf}}
+{"secret_link": {"enabled": true, "allow_outside_hours": true}}
+HTTP 200
+[Asserts]
+jsonpath "$.secret_link.allow_outside_hours" == true
+jsonpath "$.secret_link.token" == "{{link_token}}"
+
+# The issued token verifies live...
+GET {{base_url}}/api/secret-link/verify?token={{link_token}}
+HTTP 200
+[Asserts]
+jsonpath "$.valid" == true
+jsonpath "$.any_hours" == true
+
+# ...an unknown token gets the uniform valid:false...
+GET {{base_url}}/api/secret-link/verify?token=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+HTTP 200
+[Asserts]
+jsonpath "$.valid" == false
+
+# ...and rotation revokes the old link immediately.
+POST {{base_url}}/api/admin/secret-link/rotate
+X-CSRF-Token: {{csrf}}
+HTTP 200
+[Captures]
+rotated_token: jsonpath "$.token"
+[Asserts]
+jsonpath "$.token" matches /^[0-9a-f]{64}$/
+jsonpath "$.url" contains "/book/{{rotated_token}}"
+
+GET {{base_url}}/api/secret-link/verify?token={{link_token}}
+HTTP 200
+[Asserts]
+jsonpath "$.valid" == false
+
+GET {{base_url}}/api/secret-link/verify?token={{rotated_token}}
+HTTP 200
+[Asserts]
+jsonpath "$.valid" == true
+
+# Turning the link off kills verification even with a valid-format token.
+PUT {{base_url}}/api/admin/settings
+X-CSRF-Token: {{csrf}}
+{"secret_link": {"enabled": false, "allow_outside_hours": false}}
+HTTP 200
+[Asserts]
+jsonpath "$.secret_link.enabled" == false
+jsonpath "$.secret_link.token" == "{{rotated_token}}"
+
+GET {{base_url}}/api/secret-link/verify?token={{rotated_token}}
+HTTP 200
+[Asserts]
+jsonpath "$.valid" == false
+
 # ── Users ────────────────────────────────────────────────────────────────────
 GET {{base_url}}/api/admin/users
 HTTP 200

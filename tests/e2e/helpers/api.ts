@@ -109,6 +109,49 @@ export async function createClosure(
   if (resp.status() !== 201) throw new Error(`closure create failed: HTTP ${resp.status()}`)
 }
 
+/**
+ * Enables the secret studio link (bootstrapping a token on first enable) and
+ * returns the token + URL so specs can drive /book/<token> directly.
+ */
+export async function enableSecretLink(
+  page: Page,
+  opts: { allowOutsideHours?: boolean; enabled?: boolean } = {},
+): Promise<{ token: string; url: string }> {
+  await adminLogin(page)
+  const csrf = await adminCsrfToken(page)
+  const resp = await page.context().request.put(`${APP_BASE_URL}/api/admin/settings`, {
+    headers: { 'X-CSRF-Token': csrf },
+    data: {
+      secret_link: {
+        enabled: opts.enabled ?? true,
+        allow_outside_hours: opts.allowOutsideHours ?? false,
+      },
+    },
+  })
+  if (resp.status() !== 200) throw new Error(`enable secret link failed: HTTP ${resp.status()}: ${await resp.text()}`)
+  const { secret_link } = (await resp.json()) as {
+    secret_link: { enabled: boolean; token: string | null; url: string | null }
+  }
+  if (!secret_link?.token || !secret_link.url) {
+    throw new Error('secret link was not bootstrapped with a token')
+  }
+  return { token: secret_link.token, url: secret_link.url }
+}
+
+/** Books a free studio session through the public API with the secret token. */
+export async function seedSecretBooking(
+  page: Page,
+  opts: { token: string; email: string; name: string; date: string; startHour: number; endHour: number },
+): Promise<void> {
+  const start = denverTime(opts.date, opts.startHour)
+  const end = denverTime(opts.date, opts.endHour)
+  const resp = await page.context().request.post(`${APP_BASE_URL}/api/bookings`, {
+    headers: { 'X-Secret-Token': opts.token },
+    data: { name: opts.name, email: opts.email, start_time: start, end_time: end },
+  })
+  if (resp.status() !== 201) throw new Error(`secret booking create failed: HTTP ${resp.status()}: ${await resp.text()}`)
+}
+
 /** Convenience: a unique-ish email per spec run. */
 export function uniqueEmail(prefix: string): string {
   return `${prefix}.${Date.now()}.e2e@example.com`

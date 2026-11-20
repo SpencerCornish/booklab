@@ -409,6 +409,7 @@ func (s *Server) handleAdminUpdateBooking(w http.ResponseWriter, r *http.Request
 				AutoChargeAt:    time.Now().Add(time.Duration(settings.AutoChargeDelayMinutes) * time.Minute),
 				AdminURL:        s.cfg.AppURL + "/admin/bookings",
 				Timezone:        settings.Timezone,
+				FreeBooking:     booking.ViaSecretLink,
 			}
 			for _, addr := range splitEmails(settings.NotificationEmails) {
 				if err := s.email.SendStaffCompletion(addr, staffData); err != nil {

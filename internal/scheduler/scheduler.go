@@ -102,6 +102,7 @@ func (s *Scheduler) completeExpiredBookings(ctx context.Context, settings *db.Se
 				AutoChargeAt:    autoChargeAt,
 				AdminURL:        s.appURL + "/admin/bookings",
 				Timezone:        settings.Timezone,
+				FreeBooking:     b.ViaSecretLink,
 			}
 			for _, addr := range splitEmails(settings.NotificationEmails) {
 				if err := s.email.SendStaffCompletion(addr, staffData); err != nil {

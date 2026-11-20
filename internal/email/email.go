@@ -135,6 +135,9 @@ type StaffCompletionData struct {
 	AutoChargeAt    time.Time
 	AdminURL        string
 	Timezone        string
+	// FreeBooking marks a secret-link booking: no charge is due, so the
+	// auto-charge wording is replaced with a no-action note.
+	FreeBooking bool
 }
 
 type StaffChargeFailureData struct {
@@ -176,7 +179,12 @@ func (s *Service) SendStaffCancellation(to string, data StaffCancellationData) e
 }
 
 func (s *Service) SendStaffCompletion(to string, data StaffCompletionData) error {
-	return s.send(to, fmt.Sprintf("Session Complete – Action Required – %s", data.ResourceName), "staff_completion.html", data)
+	subject := fmt.Sprintf("Session Complete – Action Required – %s", data.ResourceName)
+	if data.FreeBooking {
+		// Nothing is due on a free studio booking; don't cry for action.
+		subject = fmt.Sprintf("Session Complete – %s", data.ResourceName)
+	}
+	return s.send(to, subject, "staff_completion.html", data)
 }
 
 func (s *Service) SendStaffChargeFailure(to string, data StaffChargeFailureData) error {
