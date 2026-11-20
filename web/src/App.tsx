@@ -8,6 +8,7 @@ import AdminLoginPage from './pages/AdminLoginPage'
 import AdminDashboard from './pages/AdminDashboard'
 import AdminBookings from './pages/AdminBookings'
 import AdminClosures from './pages/AdminClosures'
+import AdminDisplays from './pages/AdminDisplays'
 import AdminSettings from './pages/AdminSettings'
 import AdminInsights from './pages/AdminInsights'
 import AdminUsers from './pages/AdminUsers'
@@ -30,6 +31,7 @@ export default function App() {
           <Route index element={<AdminDashboard />} />
           <Route path="bookings" element={<AdminBookings />} />
           <Route path="closures" element={<AdminClosures />} />
+          <Route path="displays" element={<AdminDisplays />} />
           <Route path="insights" element={<AdminInsights />} />
           <Route path="users" element={<AdminUsers />} />
           <Route path="settings" element={<Navigate to="/admin/settings/general" replace />} />

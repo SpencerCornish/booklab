@@ -6,6 +6,8 @@ import type {
   BookingAdmin,
   BookingPublic,
   Closure,
+  Display,
+  DisplayStatus,
   FinalizeBookingResponse,
   InsightsData,
   PrepareBookingResponse,
@@ -190,3 +192,16 @@ export const adminChangePassword = (currentPassword: string, newPassword: string
       new_password: newPassword,
     }),
   })
+
+export const adminListDisplays = () => request<Display[]>('/admin/displays')
+
+export const adminUpdateDisplay = (id: number, body: { name?: string; status?: DisplayStatus }) =>
+  request<Display>(`/admin/displays/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(body),
+  })
+
+export const adminDeleteDisplay = (id: number) =>
+  request<void>(`/admin/displays/${id}`, { method: 'DELETE' })
+
+export const adminDisplayPreviewURL = () => `/api/admin/displays/preview.png?t=${Date.now()}`

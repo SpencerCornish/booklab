@@ -12,6 +12,8 @@ require (
 	github.com/kelseyhightower/envconfig v1.4.0
 	github.com/stripe/stripe-go/v85 v85.0.0
 	golang.org/x/crypto v0.45.0
+	golang.org/x/image v0.33.0
+	rsc.io/qr v0.2.0
 )
 
 require (
