@@ -140,6 +140,36 @@ func TestBuildSign_beforeOpening(t *testing.T) {
 	if r := runSign(at(22, 9, 30), nil, nil).RefreshAfter; r != 15*time.Minute {
 		t.Fatalf("refresh near opening = %v", r)
 	}
+	// A long refresh interval must not swallow the pre-open wake: inside the
+	// 15-minute window the sign still wakes at opening, not an hour later.
+	long := signInput{
+		Now: at(22, 9, 50), Settings: signSettings(), Loc: signLoc,
+		OpenInterval: time.Hour,
+	}
+	if r := buildSign(long).RefreshAfter; r != 10*time.Minute+20*time.Second {
+		t.Fatalf("refresh at 9:50 with a 60-minute interval = %v, want 10m20s", r)
+	}
+	// Before the window, a long interval still caps at hourly check-ins.
+	long.Now = at(22, 8, 0)
+	if r := buildSign(long).RefreshAfter; r != time.Hour {
+		t.Fatalf("refresh at 8:00 with a 60-minute interval = %v, want 1h", r)
+	}
+}
+
+func TestUpdatedLabel(t *testing.T) {
+	if got := updatedLabel(at(22, 14, 14)); got != "updated 2:00 PM" {
+		t.Fatalf("updatedLabel(2:14) = %q", got)
+	}
+	if got := updatedLabel(at(22, 14, 59)); got != "updated 2:45 PM" {
+		t.Fatalf("updatedLabel(2:59) = %q", got)
+	}
+	// Every wake within the same quarter hour renders identical bytes, so the
+	// content hash (and filename) only changes at coarse boundaries.
+	a := runSign(at(22, 14, 1), nil, nil).View
+	b := runSign(at(22, 14, 14), nil, nil).View
+	if a.Updated != b.Updated {
+		t.Fatalf("updated stamp churned within a quarter hour: %q vs %q", a.Updated, b.Updated)
+	}
 }
 
 func TestBuildSign_afterHoursShowsTomorrow(t *testing.T) {

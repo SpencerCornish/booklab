@@ -210,6 +210,10 @@ func TestDisplay_resetupDropsToPending(t *testing.T) {
 	id := strconv.Itoa(int(e.listDisplays()[0]["id"].(float64)))
 	e.admin(http.MethodPatch, "/api/admin/displays/"+id, `{"status":"approved"}`)
 
+	// An approved display hands out an image URL; re-setup must invalidate it.
+	oldImageURL := e.poll(testMAC, first["api_key"].(string))["image_url"].(string)
+	e.fetchImage(oldImageURL)
+
 	_, second := e.setup(testMAC)
 	if second["friendly_id"] != first["friendly_id"] {
 		t.Fatal("friendly ID should be stable across re-setup")
@@ -217,6 +221,10 @@ func TestDisplay_resetupDropsToPending(t *testing.T) {
 	list := e.listDisplays()
 	if len(list) != 1 || list[0]["status"] != "pending" {
 		t.Fatalf("re-setup must need approval again: %v", list)
+	}
+	// Re-setup rotates the image token, so the old image URL stops working.
+	if resp, err := e.ts.Client().Get(oldImageURL); err != nil || resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("old image URL after re-setup: %v %v", resp.StatusCode, err)
 	}
 	// The old key no longer works.
 	if body := e.poll(testMAC, first["api_key"].(string)); body["status"] != float64(202) {

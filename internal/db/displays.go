@@ -57,7 +57,8 @@ func scanDisplay(row pgx.Row) (*Display, error) {
 // a pending display. A known, non-revoked MAC gets the new key and drops back to
 // pending, so a device that re-runs setup (or anyone spoofing its MAC) needs an
 // admin's approval again. Revoked displays are left untouched; callers check
-// for them first. friendlyID is only used for new rows.
+// for them first. friendlyID is only used for new rows. The image token rotates
+// on resetup so image URLs handed out before it stop working.
 func (q *Queries) RegisterDisplay(ctx context.Context, mac, keyHash, friendlyID string) (*Display, error) {
 	return scanDisplay(q.pool.QueryRow(ctx, `
 		INSERT INTO displays (mac_address, api_key_hash, friendly_id)
@@ -66,6 +67,7 @@ func (q *Queries) RegisterDisplay(ctx context.Context, mac, keyHash, friendlyID 
 			api_key_hash = EXCLUDED.api_key_hash,
 			status       = 'pending',
 			approved_at  = NULL,
+			image_token  = gen_random_uuid(),
 			updated_at   = NOW()
 		WHERE displays.status != 'revoked'
 		RETURNING `+displayColumns,

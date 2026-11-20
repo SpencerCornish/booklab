@@ -74,7 +74,7 @@ func buildSign(in signInput) signResult {
 		Title:      in.Settings.ResourceName,
 		QRURL:      in.QRURL,
 		QRLabel:    in.QRLabel,
-		Updated:    "updated " + clock(now),
+		Updated:    updatedLabel(now),
 		BatteryLow: in.BatteryLow,
 	}
 
@@ -220,8 +220,15 @@ func signRefresh(now time.Time, open bool, shown signDay, in signInput) time.Dur
 		interval = 5 * time.Minute
 	}
 	if !open {
-		wake := shown.Start.Add(-15 * time.Minute).Sub(now)
-		return clampDuration(wake, interval, time.Hour)
+		// Wake hourly so bookings made overnight still appear, but land 15
+		// minutes before opening (the pre-open countdown) and again at opening
+		// itself, even when the configured interval is longer than that window.
+		preOpen := shown.Start.Add(-15 * time.Minute)
+		wake := preOpen.Sub(now)
+		if !now.Before(preOpen) {
+			wake = shown.Start.Sub(now) + settle
+		}
+		return clampDuration(wake, time.Minute, time.Hour)
 	}
 
 	// Next timeline row boundary (rows start at the opening time, which may be on the half hour).
@@ -308,6 +315,15 @@ func capitalize(s string) string {
 }
 
 func clock(t time.Time) string { return t.Format("3:04 PM") }
+
+// updatedLabel is the footer stamp on the sign. Between booking and hour
+// edges it is the only thing that would change from one wake to the next, so
+// it is rounded down to a quarter hour: the rendered bytes (and therefore the
+// content-hash filename) then stay the same and the firmware can skip the
+// redraw. Rounding down means the sign never looks fresher than it is.
+func updatedLabel(now time.Time) string {
+	return "updated " + clock(now.Truncate(15*time.Minute))
+}
 
 func hourLabel(t time.Time) string {
 	if t.Minute() != 0 {

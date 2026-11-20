@@ -40,7 +40,7 @@ To see exactly what approved displays are showing, open **Admin → Displays →
 The display spends most of its time asleep and wakes to ask BookLab what to show:
 
 - **During bookable hours:** it wakes every *N* minutes, set under **Admin → Displays → Refresh during open hours** (default 5, allowed range 1-60). It also wakes just after each hour boundary and at booking start and end times, so the status and the ◄ marker change on time.
-- **Outside bookable hours:** it checks in hourly, plus once 15 minutes before opening. A booking made overnight shows up within an hour.
+- **Outside bookable hours:** it checks in hourly, plus once 15 minutes before opening and again at opening time. A booking made overnight shows up within an hour.
 - **Pending displays:** these check in every minute until approved.
 
 When nothing has changed, the image name stays the same and the firmware skips the redraw. That saves battery and avoids e-ink flashing.
@@ -63,7 +63,7 @@ BookLab implements the parts of TRMNL's "bring your own server" protocol that th
 |---|---|
 | `GET /api/setup` | First boot. The device sends its MAC address in the `ID` header and receives an API key and a friendly ID. The key is stored only as a SHA-256 hash. |
 | `GET /api/display` | Every wake. The device sends `Access-Token`, `ID`, battery and Wi-Fi headers. The reply holds `image_url`, `filename` and `refresh_rate` (seconds to sleep). |
-| `GET /api/display/image/{token}/{hash}.png` | The 1-bit 800×480 PNG. The firmware fetches it without headers, so a per-display random token in the path acts as the credential. The token changes when a display is revoked or set back to pending. |
+| `GET /api/display/image/{token}/{hash}.png` | The 1-bit 800×480 PNG. The firmware fetches it without headers, so a per-display random token in the path acts as the credential. The token changes when a display is revoked, set back to pending, or re-runs setup. |
 | `POST /api/log` | Device logs. They are accepted and discarded. |
 
 Things worth knowing if you're debugging:
