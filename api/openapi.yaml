@@ -681,8 +681,8 @@ paths:
       summary: Fetch a display image
       description: >
         The 1-bit 800x480 PNG named by /display. The device fetches it without headers, so the
-        per-display token in the path is the credential; it rotates when a display is revoked
-        or returned to pending.
+        per-display token in the path is the credential; it rotates when a display is revoked,
+        returned to pending, or re-runs setup.
       operationId: displayImage
       parameters:
         - name: token

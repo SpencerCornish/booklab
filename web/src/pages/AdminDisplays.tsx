@@ -173,14 +173,14 @@ function DisplayCard({
 }
 
 function RefreshSetting() {
-  const [minutes, setMinutes] = useState<number | null>(null)
+  const [minutes, setMinutes] = useState<string | null>(null)
   const [saved, setSaved] = useState<number | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     adminGetSettings()
       .then((s) => {
-        setMinutes(s.display_refresh_minutes)
+        setMinutes(String(s.display_refresh_minutes))
         setSaved(s.display_refresh_minutes)
       })
       .catch(console.error)
@@ -188,12 +188,16 @@ function RefreshSetting() {
 
   if (minutes === null) return null
 
+  const valid = minutes.trim() !== '' && Number.isFinite(Number(minutes))
+
   const save = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (!valid) return
     setError(null)
     try {
-      const s = await adminUpdateSettings({ display_refresh_minutes: minutes })
+      const s = await adminUpdateSettings({ display_refresh_minutes: Number(minutes) })
       setSaved(s.display_refresh_minutes)
+      setMinutes(String(s.display_refresh_minutes))
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Save failed')
     }
@@ -212,13 +216,13 @@ function RefreshSetting() {
           max={60}
           required
           value={minutes}
-          onChange={(e) => setMinutes(Number(e.target.value))}
+          onChange={(e) => setMinutes(e.target.value)}
           className="w-20 rounded-lg border border-gray-300 px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
         />
         <span className="text-sm text-gray-600">minutes</span>
         <button
           type="submit"
-          disabled={minutes === saved}
+          disabled={!valid || Number(minutes) === saved}
           className="bg-blue-600 text-white rounded-lg px-3 py-1.5 text-sm font-medium hover:bg-blue-700 disabled:opacity-50 transition-colors"
         >
           Save

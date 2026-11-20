@@ -29,18 +29,10 @@ const (
 	bold
 )
 
-type faceKey struct {
-	w    weight
-	size float64
-}
-
 var (
 	fontsOnce sync.Once
 	fontsErr  error
 	fonts     [2]*opentype.Font
-
-	facesMu sync.Mutex
-	faces   = map[faceKey]font.Face{}
 )
 
 func face(w weight, size float64) font.Face {
@@ -58,17 +50,15 @@ func face(w weight, size float64) font.Face {
 		// The fonts are embedded; failing to parse them is a build problem.
 		panic(fmt.Sprintf("display: parse embedded font: %v", fontsErr))
 	}
-	facesMu.Lock()
-	defer facesMu.Unlock()
-	k := faceKey{w, size}
-	if f, ok := faces[k]; ok {
-		return f
-	}
+	// Return a new face every time: *opentype.Face is not safe for concurrent
+	// use (it reuses an internal sfnt.Buffer, rasterizer and mask), and renders
+	// can overlap across display polls and admin previews. The shared
+	// *opentype.Font is safe to use concurrently, and creating a face is cheap
+	// next to encoding the PNG.
 	f, err := opentype.NewFace(fonts[w], &opentype.FaceOptions{Size: size, DPI: 72, Hinting: font.HintingFull})
 	if err != nil {
 		panic(fmt.Sprintf("display: new face: %v", err))
 	}
-	faces[k] = f
 	return f
 }
 

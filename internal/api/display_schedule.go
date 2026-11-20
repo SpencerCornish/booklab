@@ -119,6 +119,11 @@ func describeOpenHours(v *display.View, now time.Time, today signDay, in signInp
 	}
 	if c := partialClosureAt(in.Closures, now, in.Loc); c != nil {
 		_, end := partialClosureBounds(c, now, in.Loc)
+		// A closure may run past today's closing time; the sign should not say
+		// the room is closed until 11 PM when the building shuts at 6.
+		if end.After(today.End) {
+			end = today.End
+		}
 		v.Status, v.Headline = display.StatusClosed, "CLOSED"
 		v.Detail = "until " + clock(end)
 		if c.Reason != nil && *c.Reason != "" {
@@ -142,13 +147,16 @@ func describeOpenHours(v *display.View, now time.Time, today signDay, in signInp
 // right then, the line says how long it stays free instead of repeating it.
 func nextOpenLine(now, busyUntil time.Time, today signDay, in signInput) string {
 	t := now
+	busy := "Booked" // what is holding the room if it stays busy until closing
 	for t.Before(today.End) {
 		if b := bookingAt(in.Bookings, t); b != nil {
 			t = b.EndTime
+			busy = "Booked"
 			continue
 		}
 		if c := partialClosureAt(in.Closures, t, in.Loc); c != nil {
 			_, t = partialClosureBounds(c, t, in.Loc)
+			busy = "Closed"
 			continue
 		}
 		if !t.Equal(busyUntil) {
@@ -159,7 +167,7 @@ func nextOpenLine(now, busyUntil time.Time, today signDay, in signInput) string 
 		}
 		return "Then free until closing"
 	}
-	return "Booked until closing"
+	return busy + " until closing"
 }
 
 // freeUntilFrom is when the free stretch starting at t ends: the next booking

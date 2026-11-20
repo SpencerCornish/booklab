@@ -225,6 +225,29 @@ func TestBuildSign_partialClosure(t *testing.T) {
 	}
 }
 
+func TestBuildSign_partialClosureUntilClose(t *testing.T) {
+	reason := "Cleaning"
+	// A closure that reaches closing time (or runs past it) is still a closure,
+	// not a booking, and the detail line should stop at closing time.
+	for _, endHour := range []int{18, 19} {
+		st, et := clockOf(16, 0), clockOf(endHour, 0)
+		cs := []*db.Closure{{StartDate: storedDate(22), EndDate: storedDate(22), StartTime: &st, EndTime: &et, Reason: &reason}}
+		v := runSign(at(22, 16, 30), nil, cs).View
+		if v.Detail != "until 6:00 PM" || v.Next != "Closed until closing" {
+			t.Fatalf("closure ending at %02d:00: %q / %q", endHour, v.Detail, v.Next)
+		}
+	}
+
+	// If a booking picks up after the closure and runs to closing, the room is
+	// booked, not merely closed.
+	st, et := clockOf(16, 0), clockOf(17, 0)
+	cs := []*db.Closure{{StartDate: storedDate(22), EndDate: storedDate(22), StartTime: &st, EndTime: &et}}
+	bs := []*db.Booking{booking("A B", at(22, 17, 0), at(22, 18, 0))}
+	if got := runSign(at(22, 16, 30), bs, cs).View.Next; got != "Booked until closing" {
+		t.Fatalf("closure then booking: %q", got)
+	}
+}
+
 func TestBuildSign_thenFreeUntil(t *testing.T) {
 	bs := []*db.Booking{
 		booking("A B", at(22, 10, 0), at(22, 11, 0)),
