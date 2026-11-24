@@ -218,6 +218,11 @@ func (s *Server) handleDisplayPoll(w http.ResponseWriter, r *http.Request) {
 		"reset_firmware":  false,
 		"update_firmware": false,
 		"firmware_url":    "",
+		// Force a full (flashing) refresh. TRMNL firmware otherwise uses
+		// partial refreshes, which leave ghosts of the previous screen and
+		// only clean up every 8th redraw. The sign only redraws when its
+		// content changes, so the flash is rare.
+		"maximum_compatibility": true,
 	})
 }
 

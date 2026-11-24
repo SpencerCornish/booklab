@@ -103,6 +103,7 @@ sign_image: jsonpath "$.image_url"
 [Asserts]
 jsonpath "$.status" == 0
 jsonpath "$.filename" != "{{pending_filename}}"
+jsonpath "$.maximum_compatibility" == true
 jsonpath "$.refresh_rate" >= 60
 jsonpath "$.refresh_rate" <= 3600
 

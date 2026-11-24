@@ -74,7 +74,6 @@ func buildSign(in signInput) signResult {
 		Title:      in.Settings.ResourceName,
 		QRURL:      in.QRURL,
 		QRLabel:    in.QRLabel,
-		Updated:    updatedLabel(now),
 		BatteryLow: in.BatteryLow,
 	}
 
@@ -323,15 +322,6 @@ func capitalize(s string) string {
 }
 
 func clock(t time.Time) string { return t.Format("3:04 PM") }
-
-// updatedLabel is the footer stamp on the sign. Between booking and hour
-// edges it is the only thing that would change from one wake to the next, so
-// it is rounded down to a quarter hour: the rendered bytes (and therefore the
-// content-hash filename) then stay the same and the firmware can skip the
-// redraw. Rounding down means the sign never looks fresher than it is.
-func updatedLabel(now time.Time) string {
-	return "updated " + clock(now.Truncate(15*time.Minute))
-}
 
 func hourLabel(t time.Time) string {
 	if t.Minute() != 0 {

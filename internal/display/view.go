@@ -55,7 +55,8 @@ type View struct {
 	QRURL   string // encoded into the QR code; no QR when empty
 	QRLabel string // printed beside the QR code
 
-	Updated    string // "updated 2:14 PM"
+	// No "updated at" clock on purpose: any pixel that changes on every poll
+	// forces a redraw every poll, which ghosts the panel and drains the battery.
 	BatteryLow bool
 }
 

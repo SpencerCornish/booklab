@@ -43,7 +43,9 @@ The display spends most of its time asleep and wakes to ask BookLab what to show
 - **Outside bookable hours:** it checks in hourly, plus once 15 minutes before opening and again at opening time. A booking made overnight shows up within an hour.
 - **Pending displays:** these check in every minute until approved.
 
-When nothing has changed, the image name stays the same and the firmware skips the redraw. That saves battery and avoids e-ink flashing.
+The display only redraws when the picture actually changes: a booking starts or ends, the hour rolls over, or the schedule is edited. When nothing has changed, the image name stays the same and the firmware skips the redraw. That's also why the screen has no "last updated" clock, which would force a redraw on every check-in.
+
+Every redraw is a full refresh, so the panel briefly flashes black and white. TRMNL firmware otherwise uses partial refreshes, which avoid the flash but leave ghosts of the previous screen, especially when much of the screen changes at once. BookLab turns those off by sending `maximum_compatibility: true` in each `/api/display` reply.
 
 The admin page shows each display's battery voltage, Wi-Fi signal, firmware version and last check-in. Below about 3.5 V the battery is marked as low, and the sign shows a small battery icon in its bottom corner.
 

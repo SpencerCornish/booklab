@@ -30,28 +30,25 @@ func sampleViews() map[string]View {
 			Detail: "until 3:00 PM", DetailStrong: "Jon P.", Next: "Next open: 3:00 PM",
 			DayLabel: "FRI NOV 20", Rows: sampleRows(4),
 			QRURL: "https://book.artlab.example.org", QRLabel: "Book at book.artlab.example.org",
-			Updated: "updated 2:14 PM", BatteryLow: true,
+			BatteryLow: true,
 		},
 		"open": {
 			Title: "Darkroom", Status: StatusOpen, Headline: "OPEN",
 			Detail: "free until 5:00 PM", Next: "Next booking: 5:00 PM",
 			DayLabel: "FRI NOV 20", Rows: sampleRows(5),
 			QRURL: "https://book.artlab.example.org", QRLabel: "Book at book.artlab.example.org",
-			Updated: "updated 3:02 PM",
 		},
 		"after_hours": {
 			Title: "Darkroom", Status: StatusClosed, Headline: "CLOSED",
 			Detail: "opens 10:00 AM", DetailStrong: "tomorrow",
 			DayLabel: "TOMORROW · SAT NOV 21", Rows: sampleRows(-1),
 			QRURL: "https://book.artlab.example.org", QRLabel: "Book at book.artlab.example.org",
-			Updated: "updated 9:41 PM",
 		},
 		"closure_day": {
 			Title: "Darkroom", Status: StatusClosed, Headline: "CLOSED",
 			Detail: "today", Next: "Opens 10:00 AM Mon, Nov 23",
 			DayLabel: "SAT NOV 21", EmptyMessage: "Closed for chemistry change",
 			QRURL: "https://book.artlab.example.org", QRLabel: "Book at book.artlab.example.org",
-			Updated: "updated 8:00 AM",
 		},
 	}
 }

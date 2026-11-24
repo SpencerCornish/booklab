@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"strings"
 	"testing"
 	"time"
@@ -100,6 +101,26 @@ func TestBuildSign_inUse(t *testing.T) {
 	}
 }
 
+// Polls between edges must render identically, or every poll becomes an
+// e-ink redraw (ghosting, battery drain).
+func TestBuildSign_stableBetweenEdges(t *testing.T) {
+	bs := []*db.Booking{booking("Maya Rodriguez", at(22, 12, 0), at(22, 14, 0))}
+	for _, pair := range [][2]time.Time{
+		{at(22, 13, 1), at(22, 13, 59)}, // in use
+		{at(22, 10, 5), at(22, 10, 55)}, // open
+		{at(22, 19, 0), at(22, 23, 59)}, // after hours
+	} {
+		a, err := display.RenderSchedule(runSign(pair[0], bs, nil).View)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, _ := display.RenderSchedule(runSign(pair[1], bs, nil).View)
+		if !bytes.Equal(a, b) {
+			t.Errorf("image changed between %s and %s with no schedule edge in between", clock(pair[0]), clock(pair[1]))
+		}
+	}
+}
+
 func TestBuildSign_refreshLandsOnEdges(t *testing.T) {
 	bs := []*db.Booking{booking("A B", at(22, 12, 0), at(22, 14, 0))}
 	res := runSign(at(22, 13, 58), bs, nil)
@@ -153,22 +174,6 @@ func TestBuildSign_beforeOpening(t *testing.T) {
 	long.Now = at(22, 8, 0)
 	if r := buildSign(long).RefreshAfter; r != time.Hour {
 		t.Fatalf("refresh at 8:00 with a 60-minute interval = %v, want 1h", r)
-	}
-}
-
-func TestUpdatedLabel(t *testing.T) {
-	if got := updatedLabel(at(22, 14, 14)); got != "updated 2:00 PM" {
-		t.Fatalf("updatedLabel(2:14) = %q", got)
-	}
-	if got := updatedLabel(at(22, 14, 59)); got != "updated 2:45 PM" {
-		t.Fatalf("updatedLabel(2:59) = %q", got)
-	}
-	// Every wake within the same quarter hour renders identical bytes, so the
-	// content hash (and filename) only changes at coarse boundaries.
-	a := runSign(at(22, 14, 1), nil, nil).View
-	b := runSign(at(22, 14, 14), nil, nil).View
-	if a.Updated != b.Updated {
-		t.Fatalf("updated stamp churned within a quarter hour: %q vs %q", a.Updated, b.Updated)
 	}
 }
 

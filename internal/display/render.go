@@ -356,7 +356,7 @@ func drawLeftPanel(c *canvas, v View) {
 
 	// QR block, anchored to the bottom.
 	const qrSize = 108
-	qrY := Height - margin - 26 - qrSize
+	qrY := Height - margin - qrSize
 	if v.QRURL != "" && y < qrY {
 		c.qr(v.QRURL, x0, qrY, qrSize)
 		lx := x0 + qrSize + 12
@@ -371,8 +371,6 @@ func drawLeftPanel(c *canvas, v View) {
 		}
 	}
 
-	ff := face(regular, 14)
-	c.text(ff, x0, Height-margin+2, v.Updated, black)
 	if v.BatteryLow {
 		c.battery(x0+w-29, Height-margin-10)
 	}

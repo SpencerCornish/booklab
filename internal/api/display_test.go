@@ -174,6 +174,9 @@ func TestDisplay_setupApproveAndPoll(t *testing.T) {
 	if approved["filename"] == pending["filename"] {
 		t.Fatal("filename should change once the schedule replaces the pending screen")
 	}
+	if approved["maximum_compatibility"] != true {
+		t.Fatal("approved poll must ask for a full refresh to avoid ghosting")
+	}
 	if r := approved["refresh_rate"].(float64); r < 60 || r > 3600 {
 		t.Fatalf("refresh_rate %v out of range", r)
 	}
